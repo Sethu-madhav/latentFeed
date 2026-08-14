@@ -450,9 +450,20 @@ const ANALYSTS: SourceDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Research papers.
+// High-volume feeds, deliberately NOT in the registry.
+//
+// These are correct and verified, but between them they contributed several
+// hundred items a day and drowned the feed — arXiv alone was ~450 of the first
+// 1,000 articles. They were removed from the running install, and a
+// `retired_sources` tombstone stops `db:seed` resurrecting them *there*; a
+// fresh database has no tombstones, so leaving them in the registry meant
+// every new deployment got them straight back.
+//
+// Kept here rather than deleted so the verified URLs and settings aren't lost.
+// To bring one back, move it into the arrays below and re-seed, or add it
+// through the "Add a feed" form on /sources.
 // ---------------------------------------------------------------------------
-const RESEARCH: SourceDef[] = [
+export const HIGH_VOLUME_SOURCES: SourceDef[] = [
   {
     slug: "arxiv-cs-cl",
     name: "arXiv cs.CL (Computation & Language)",
@@ -493,6 +504,17 @@ const RESEARCH: SourceDef[] = [
     baseCredibility: 5,
     // Community upvotes ride along as an impact signal.
     pollMinutes: 120,
+  },
+  // Reddit's biggest local-model community: high signal, very high volume.
+  {
+    slug: "reddit-localllama",
+    name: "r/LocalLLaMA",
+    url: "https://www.reddit.com/r/LocalLLaMA/",
+    feedUrl: "https://www.reddit.com/r/LocalLLaMA/.rss",
+    kind: "reddit",
+    category: "community",
+    baseCredibility: 2,
+    pollMinutes: 60,
   },
 ];
 
@@ -574,16 +596,6 @@ const COMMUNITY: SourceDef[] = [
     baseCredibility: 1,
   },
   {
-    slug: "reddit-localllama",
-    name: "r/LocalLLaMA",
-    url: "https://www.reddit.com/r/LocalLLaMA/",
-    feedUrl: "https://www.reddit.com/r/LocalLLaMA/.rss",
-    kind: "reddit",
-    category: "community",
-    baseCredibility: 2,
-    pollMinutes: 60,
-  },
-  {
     slug: "reddit-singularity",
     name: "r/singularity",
     url: "https://www.reddit.com/r/singularity/",
@@ -616,7 +628,6 @@ export const SOURCE_REGISTRY: SourceDef[] = [
   ...GOOGLE_NEWS,
   ...PRESS,
   ...ANALYSTS,
-  ...RESEARCH,
   ...TOOLING,
   ...COMMUNITY,
 ];
