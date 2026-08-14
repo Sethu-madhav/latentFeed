@@ -4,6 +4,7 @@ import cron from "node-cron";
 import { sql } from "@/db/client";
 import { embeddingHalt } from "@/lib/embeddings";
 import { embeddingsEnabled, env, llmEnabled } from "@/lib/env";
+import { runClusterCycle } from "./cluster";
 import { pendingCount, runEnrichCycle } from "./enrich";
 import { runCycle } from "./ingest";
 
@@ -15,6 +16,9 @@ let lastSummary: { polled: number; inserted: number; failed: number } | null =
 let enriching = false;
 let lastEnrichAt: Date | null = null;
 let enrichHalted: string | null = null;
+
+let clustering = false;
+let lastClusterAt: Date | null = null;
 
 /** Run a cycle, guarding against overlap when one run outlasts the interval. */
 async function tick(trigger: string): Promise<void> {
@@ -102,6 +106,11 @@ const health = createServer((req, res) => {
           model: env.embeddingModel,
           halted: embeddingHalt(),
         },
+        cluster: {
+          running: clustering,
+          lastRunAt: lastClusterAt?.toISOString() ?? null,
+          cron: env.clusterCron,
+        },
       }),
     );
     return;
@@ -135,6 +144,37 @@ if (llmEnabled()) {
   );
 } else {
   console.log("enrichment off (no OPENAI_API_KEY or DISABLE_LLM=1)");
+}
+
+/**
+ * Regroup recent articles into stories. Runs after ingestion has had time to
+ * land new items, and is a full recompute over the window, so it is safe to
+ * miss a cycle.
+ */
+async function clusterTick(): Promise<void> {
+  if (clustering) return;
+  clustering = true;
+  try {
+    const summary = await runClusterCycle();
+    lastClusterAt = new Date();
+    if (summary.stories > 0) {
+      console.log(
+        `[cluster] ${summary.stories} stories · ${summary.articlesClustered} articles · ${summary.rescored} re-scored`,
+      );
+    }
+  } catch (err) {
+    console.error("[cluster] cycle failed", err);
+  } finally {
+    clustering = false;
+  }
+}
+
+if (!env.disableIngest) {
+  if (!cron.validate(env.clusterCron)) {
+    throw new Error(`invalid CLUSTER_CRON: ${env.clusterCron}`);
+  }
+  cron.schedule(env.clusterCron, () => void clusterTick());
+  console.log(`clustering on "${env.clusterCron}"`);
 }
 
 async function shutdown(signal: string): Promise<void> {

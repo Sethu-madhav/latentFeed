@@ -5,6 +5,7 @@ import {
   articles,
   ingestRuns,
   sources,
+  stories,
   type Source,
 } from "@/db/schema";
 import { enrich } from "@/lib/enrich";
@@ -241,6 +242,16 @@ async function storeItem(
     .limit(1);
   if (existing.length > 0) return "skipped";
 
+  // Already known as another outlet's take on an existing story. Without this
+  // check every poll would redo the dedup work for items that will never be
+  // inserted, and re-touch their corroboration.
+  const knownDuplicate = await db
+    .select({ id: articleDuplicates.id })
+    .from(articleDuplicates)
+    .where(eq(articleDuplicates.url, item.url))
+    .limit(1);
+  if (knownDuplicate.length > 0) return "skipped";
+
   const since = new Date(Date.now() - DEDUP_WINDOW_HOURS * 3_600_000);
 
   const duplicate = embedding
@@ -252,7 +263,7 @@ async function storeItem(
     // rewording its own headline proves nothing.
     if (duplicate.sourceId === source.id) return "skipped";
 
-    await db
+    const inserted = await db
       .insert(articleDuplicates)
       .values({
         articleId: duplicate.id,
@@ -262,9 +273,11 @@ async function storeItem(
         publisherDomain: item.publisherDomain ?? null,
         similarity: duplicate.similarity,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: articleDuplicates.id });
 
-    await bumpCorroboration(duplicate.id);
+    // Only recount when a genuinely new outlet was recorded.
+    if (inserted.length > 0) await recomputeCorroboration(duplicate.id);
     return "duplicate";
   }
 
@@ -303,13 +316,40 @@ async function storeItem(
 }
 
 /**
- * Increment corroboration and re-run the scorer, so an item that several
- * outlets have now picked up can gain its +1 without waiting for a re-enrich.
+ * Recount corroboration from the duplicate records and re-run the scorer, so
+ * an item several outlets have picked up gains its +1 without waiting for a
+ * re-enrich.
+ *
+ * Derived rather than incremented: an incrementing counter drifts upward every
+ * time a feed re-serves an item we've already matched, and corroboration feeds
+ * the credibility score, so drift there quietly inflates trust.
  */
-async function bumpCorroboration(articleId: string): Promise<void> {
+export async function recomputeCorroboration(articleId: string): Promise<void> {
+  const [{ outlets }] = await db
+    .select({
+      outlets: sql<number>`count(distinct ${articleDuplicates.sourceId})::int`,
+    })
+    .from(articleDuplicates)
+    .where(eq(articleDuplicates.articleId, articleId));
+
+  // Corroboration has two sources: outlets dedup folded into this article, and
+  // sibling articles the clustering pass grouped with it. Take the larger, or
+  // whichever job ran last would undo the other's finding.
+  const [viaStory] = await db
+    .select({ sourceCount: stories.sourceCount })
+    .from(articles)
+    .innerJoin(stories, eq(stories.id, articles.storyId))
+    .where(eq(articles.id, articleId))
+    .limit(1);
+
+  const corroboration = Math.max(
+    Number(outlets),
+    viaStory ? viaStory.sourceCount - 1 : 0,
+  );
+
   const [row] = await db
     .update(articles)
-    .set({ corroborationCount: sql`${articles.corroborationCount} + 1` })
+    .set({ corroborationCount: corroboration })
     .where(eq(articles.id, articleId))
     .returning({
       title: articles.title,

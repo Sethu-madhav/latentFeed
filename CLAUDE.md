@@ -32,6 +32,7 @@ npm run db:seed          # upsert orgs + source registry (idempotent)
 npm run ingest:once      # one cycle now; append slugs to limit: npm run ingest:once openai-news
 npm run enrich:once      # one LLM batch; `all` drains the backlog
 npm run embed:backfill   # embed rows with no vector; `all` drains
+npm run cluster:once     # regroup the last 7 days into stories
 npm run test             # vitest
 npm run typecheck        # tsc --noEmit
 ```
@@ -83,8 +84,29 @@ hover text. **Never add a scoring rule without recording its reason** — an
 opaque score is worse than none here.
 
 **Duplicates are kept, not dropped.** A story another outlet already filed goes
-into `article_duplicates` and bumps the original's `corroboration_count`, which
-re-runs the scorer. That is how a rumour earns its way toward confirmed.
+into `article_duplicates` and re-runs the scorer. That is how a rumour earns
+its way toward confirmed.
+
+**`corroboration_count` is derived, never incremented.** It is recomputed as
+`max(distinct outlets in article_duplicates, story.source_count − 1)`. An
+incrementing counter drifted upward every time a feed re-served an item
+already matched — one article reached 11 against 2 real outlets — and since
+corroboration feeds the `+1 corroborated` rule, that silently inflated
+credibility. Anything touching it must recompute, not add.
+
+**Clustering (`worker/cluster.ts`) groups one event across outlets.** It is a
+full recompute over a 7-day window each run, not incremental: a late article
+can merge two groups that previously looked separate. Single-link grouping
+lets a story chain across rewordings. Only clusters of ≥2 articles become
+`stories`; a lone article is just an article.
+
+**Cluster thresholds are looser than dedup's, and deliberately conservative.**
+Dedup drops an article on a match so it must be strict; clustering only
+groups. But because cluster size raises corroboration and therefore
+credibility, a false merge inflates trust — at a 0.30 title threshold
+unrelated stories about the same company merged into one 10-article cluster.
+0.42 is the validated floor for the title fallback; embeddings use 0.82 cosine
+and catch synonym rewrites ("buy" vs "acquire") that headline overlap cannot.
 
 **Filter state lives entirely in the URL** (`?q=&cat=&org=&tag=&src=&cred=&sort=&page=`).
 The rail is plain anchors built by `buildQuery` in `lib/filters.ts`, so it works
@@ -131,6 +153,11 @@ without JS and every view is shareable. Don't move it to client state.
 - **The gpt-5 family rejects `temperature`**, so `structuredCompletion` doesn't
   send it. Structured output uses `response_format: json_schema` with
   `strict: true`.
+- **Don't run `npm run build` while `next dev` is running.** The build rewrites
+  `.next`, invalidating the running dev server's chunk hashes; the page then
+  404s on `_next/static/chunks/*` and throws bogus `ReferenceError`s for
+  symbols that are plainly imported. Stop the dev server, `rm -rf .next`,
+  restart. Several "impossible" errors here were only ever this.
 
 ## Source control (`/sources`)
 
@@ -180,7 +207,22 @@ and `/`.
 
 ## Roadmap
 
-Sections 1 (foundation, ingest, feed UI), 2 (source control) and 3 (OpenAI
-enrichment, embeddings, semantic dedup) are done. Next: **4** story clustering
-· **5** Model Radar (leak → launch lifecycle) · **6** release and benchmark
-tracker.
+Sections 1 (foundation, ingest, feed UI), 2 (source control), 3 (OpenAI
+enrichment, embeddings, semantic dedup) and 4 (story clustering) are done.
+Next: **5** Model Radar (leak → launch lifecycle) · **6** release and
+benchmark tracker.
+
+**Feed layout:** a responsive card grid (1 / 2 / 3 / 4 columns). Two things
+about it are load-bearing:
+
+- **Cards have no thumbnail**, because there is no image to show. The short
+  accent strip at the top of each card stands in for one, tinted with the lead
+  company's colour so the grid can be scanned by company. Keep it short — it
+  carries no information, so a tall band is just decoration pushing the
+  headline down.
+- **Use named Tailwind breakpoints for the column counts.** An arbitrary
+  `min-[1800px]:` variant sorts *before* the named ones in the generated CSS,
+  so `xl:grid-cols-3` won at wide widths and the fourth column never appeared.
+
+Cards are equal height within a row (`mt-auto` on the footer) so credibility
+meters line up and can be compared across a row at a glance.

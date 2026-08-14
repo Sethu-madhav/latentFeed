@@ -16,6 +16,7 @@
     "ingest:once": "tsx worker/cli.ts",
     "enrich:once": "tsx worker/enrich-cli.ts",
     "embed:backfill": "tsx worker/embed-cli.ts",
+    "cluster:once": "tsx worker/cluster-cli.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx db/migrate.ts",
     "db:seed": "tsx db/seed.ts",

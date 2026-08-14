@@ -25,6 +25,8 @@ export const env = {
     "latentFeed/0.1 (+https://github.com/latentfeed)",
   pollCron: process.env.POLL_CRON ?? "*/30 * * * *",
   enrichCron: process.env.ENRICH_CRON ?? "*/10 * * * *",
+  /** Offset from the poll schedule so clustering sees freshly-landed items. */
+  clusterCron: process.env.CLUSTER_CRON ?? "5,35 * * * *",
   workerPort: Number(process.env.WORKER_PORT ?? 8788),
   disableIngest: process.env.DISABLE_INGEST === "1",
 

@@ -1,9 +1,10 @@
-import { ArticleRow } from "@/components/article-row";
+import { ArticleCard } from "@/components/article-card";
 import { FilterRail } from "@/components/filter-rail";
 import { Pagination } from "@/components/pagination";
 import { SiteHeader } from "@/components/site-header";
 import { getFacets, getFeed, getStats } from "@/lib/data";
 import { hasActiveFilters, parseFilters } from "@/lib/filters";
+import { cn } from "@/lib/utils";
 
 // Always render fresh: the worker writes on its own schedule, and a cached
 // feed showing hours-old news defeats the point of a 30-minute poll.
@@ -36,13 +37,23 @@ export default async function FeedPage({
             <EmptyState hasFilters={hasActiveFilters(filters)} q={filters.q} />
           ) : (
             <>
-              {items.map((article) => (
-                <ArticleRow
-                  key={article.id}
-                  article={article}
-                  filters={filters}
-                />
-              ))}
+              <div
+                className={cn(
+                  "grid gap-3 px-4 py-4 sm:px-6",
+                  // Named breakpoints only: an arbitrary min-[…] variant sorts
+                  // before the named ones in the generated CSS, so `xl:` would
+                  // win at wide widths and the fourth column never appeared.
+                  "grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4",
+                )}
+              >
+                {items.map((article) => (
+                  <ArticleCard
+                    key={article.id}
+                    article={article}
+                    filters={filters}
+                  />
+                ))}
+              </div>
               <Pagination filters={filters} total={total} />
             </>
           )}

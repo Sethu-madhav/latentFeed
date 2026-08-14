@@ -13,11 +13,13 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
+  articleDuplicates,
   articles,
   ingestRuns,
   orgs,
   retiredSources,
   sources,
+  stories,
   type ArticleCategory,
   type CredibilityReason,
   type SourceCategory,
@@ -45,6 +47,10 @@ export interface FeedArticle {
   sourceSlug: string;
   /** 'heuristic' or 'llm' — surfaced so the two are distinguishable. */
   enrichedBy: string;
+  /** Set when this article is one outlet's take on a clustered story. */
+  storyId: string | null;
+  /** Distinct outlets covering that story, including this one. */
+  storySourceCount: number | null;
 }
 
 /** The weighted tsvector — must mirror articles_search_idx to use it. */
@@ -130,9 +136,12 @@ export async function getFeed(
         sourceName: sources.name,
         sourceSlug: sources.slug,
         enrichedBy: articles.enrichedBy,
+        storyId: articles.storyId,
+        storySourceCount: stories.sourceCount,
       })
       .from(articles)
       .innerJoin(sources, eq(sources.id, articles.sourceId))
+      .leftJoin(stories, eq(stories.id, articles.storyId))
       .where(where)
       .orderBy(...orderFor(f))
       .limit(PAGE_SIZE)
@@ -327,6 +336,90 @@ export async function getSourcesWithHealth(): Promise<SourceHealth[]> {
       itemsNew7d: itemsBySource.get(s.id) ?? 0,
     };
   });
+}
+
+export interface StoryDetail {
+  id: string;
+  headline: string;
+  summary: string | null;
+  category: ArticleCategory;
+  firstSeenAt: Date;
+  lastUpdatedAt: Date;
+  articleCount: number;
+  sourceCount: number;
+  topCredibility: number;
+  orgSlugs: string[];
+  tags: string[];
+  clusteredBy: string;
+  articles: FeedArticle[];
+  /** Outlets that carried the story but were folded in during dedup. */
+  alsoCarriedBy: { sourceName: string; url: string; title: string | null }[];
+}
+
+/** One clustered story with every article and outlet covering it. */
+export async function getStory(id: string): Promise<StoryDetail | null> {
+  const [story] = await db.select().from(stories).where(eq(stories.id, id)).limit(1);
+  if (!story) return null;
+
+  const members = await db
+    .select({
+      id: articles.id,
+      url: articles.url,
+      title: articles.title,
+      summary: articles.summary,
+      publishedAt: articles.publishedAt,
+      category: articles.category,
+      credibility: articles.credibility,
+      credibilityReason: articles.credibilityReason,
+      isRumour: articles.isRumour,
+      impact: articles.impact,
+      orgSlugs: articles.orgSlugs,
+      tags: articles.tags,
+      corroborationCount: articles.corroborationCount,
+      publisherDomain: articles.publisherDomain,
+      sourceName: sources.name,
+      sourceSlug: sources.slug,
+      enrichedBy: articles.enrichedBy,
+      storyId: articles.storyId,
+      storySourceCount: sql<number>`${story.sourceCount}`,
+    })
+    .from(articles)
+    .innerJoin(sources, eq(sources.id, articles.sourceId))
+    .where(eq(articles.storyId, id))
+    .orderBy(articles.publishedAt);
+
+  const dupes = await db
+    .select({
+      sourceName: sources.name,
+      url: articleDuplicates.url,
+      title: articleDuplicates.title,
+    })
+    .from(articleDuplicates)
+    .innerJoin(sources, eq(sources.id, articleDuplicates.sourceId))
+    .where(
+      inArray(
+        articleDuplicates.articleId,
+        members.map((m) => m.id),
+      ),
+    )
+    .orderBy(articleDuplicates.seenAt);
+
+  return {
+    id: story.id,
+    headline: story.headline,
+    summary: story.summary,
+    category: story.category,
+    firstSeenAt: story.firstSeenAt,
+    lastUpdatedAt: story.lastUpdatedAt,
+    articleCount: story.articleCount,
+    sourceCount: story.sourceCount,
+    topCredibility: story.topCredibility,
+    orgSlugs: story.orgSlugs,
+    tags: story.tags,
+    clusteredBy: story.clusteredBy,
+    articles: members,
+    alsoCarriedBy: dupes,
+  };
 }
 
 export interface RetiredSource {

@@ -163,6 +163,12 @@ export const articles = pgTable(
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     /** Independent outlets seen carrying the same story. */
     corroborationCount: integer("corroboration_count").notNull().default(0),
+    /**
+     * The cluster this belongs to, if any. An article belongs to at most one
+     * story, so this is a plain FK rather than a join table. Set to null on
+     * story deletion so re-clustering can reassign it.
+     */
+    storyId: uuid("story_id"),
 
     /**
      * Semantic dedup vector. Null when embeddings are switched off or the
@@ -188,6 +194,7 @@ export const articles = pgTable(
     index("articles_orgs_idx").using("gin", t.orgSlugs),
     index("articles_tags_idx").using("gin", t.tags),
     index("articles_enriched_by_idx").on(t.enrichedBy),
+    index("articles_story_idx").on(t.storyId),
     // HNSW over cosine distance, which is what the dedup query orders by.
     index("articles_embedding_idx").using(
       "hnsw",
@@ -204,6 +211,42 @@ export const articles = pgTable(
         setweight(to_tsvector('english', coalesce(${t.summary}, '')), 'B')
       )`,
     ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// stories — one event, as covered by several outlets.
+//
+// A story exists only where two or more articles describe the same thing; a
+// lone article is just an article. Aggregates are denormalised here so the
+// feed can show "7 sources" without a join per row.
+// ---------------------------------------------------------------------------
+export const stories = pgTable(
+  "stories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Taken from the most credible member, tie-broken by recency. */
+    headline: text("headline").notNull(),
+    summary: text("summary"),
+    category: text("category").$type<ArticleCategory>().notNull().default("other"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }).notNull(),
+    articleCount: integer("article_count").notNull().default(0),
+    /** Distinct outlets, including those recorded as duplicates. */
+    sourceCount: integer("source_count").notNull().default(0),
+    topCredibility: smallint("top_credibility").notNull().default(1),
+    maxImpact: smallint("max_impact").notNull().default(0),
+    orgSlugs: text("org_slugs").array().notNull().default(sql`'{}'::text[]`),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** Mean of member embeddings; null when clustered by title similarity. */
+    centroid: vector("centroid", { dimensions: 1536 }),
+    embeddingModel: text("embedding_model"),
+    /** 'embedding' or 'title' — how this cluster was formed. */
+    clusteredBy: text("clustered_by").notNull().default("title"),
+  },
+  (t) => [
+    index("stories_last_updated_idx").on(t.lastUpdatedAt.desc()),
+    index("stories_source_count_idx").on(t.sourceCount.desc()),
   ],
 );
 

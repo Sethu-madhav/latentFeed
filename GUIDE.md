@@ -205,11 +205,36 @@ articles you're actually reading get upgraded first.
 filtered out of dedup by `embedding_model` rather than silently mismatched.
 Re-run `npm run embed:backfill all` after any change.
 
+## Story clustering
+
+```bash
+npm run cluster:once   # regroup the last 7 days
+```
+
+The same event covered by several outlets becomes one **story**. Clustered
+rows show a clay "N sources" link in the feed; `/story/[id]` lists every
+outlet, in publication order, with each one's own credibility score — so you
+can see a rumour appear at one outlet and firm up as others corroborate it.
+
+Independent coverage raises credibility: a story's outlet count sets each
+member's corroboration, which is worth +1 once two or more independent sources
+carry it. That is the whole "rumour earns its way to confirmed" mechanic.
+
+Grouping uses embeddings when available (0.82 cosine) and headline overlap
+otherwise (0.42 Jaccard). The title fallback misses synonym rewrites — "buy"
+versus "acquire" share no words — and the threshold is deliberately *not*
+lowered to catch them, because at 0.30 unrelated stories about the same
+company merge, and a false merge inflates credibility. The story page says
+which method grouped it.
+
+Clustering is a full recompute over the window, so it's safe to re-run or to
+miss a cycle.
+
 ## Roadmap
 
 1. ✅ Foundation, ingestion, feed UI
 2. ✅ `/sources` CRUD, per-source health, custom feeds
 3. ✅ OpenAI enrichment, embeddings, semantic dedup
-4. Story clustering with corroboration-boosted credibility
+4. ✅ Story clustering with corroboration-boosted credibility
 5. Model Radar — leak → corroboration → launch lifecycle
 6. Release and benchmark tracker
