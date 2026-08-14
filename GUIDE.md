@@ -100,8 +100,27 @@ Everything is a URL parameter, so any view can be bookmarked or shared:
 
 ## Managing sources
 
-Edit `lib/sources/registry.ts`, then `npm run db:seed` — it upserts by slug and
-never overwrites rows a user has edited in the UI (`meta.managedBy='user'`).
+Most of this is now on **`/sources`**. Each row shows what the feed is
+contributing (article count, new items in the last 7 days, when it was last
+polled) and what broke if anything did.
+
+| Control | Effect |
+|---|---|
+| 👁 Hide | Drops the source out of the feed but keeps ingesting it. Its articles still count toward corroboration. Use this for noisy sources. |
+| ⏻ Stop | Halts polling entirely. Re-enabling also clears the failure counter. |
+| ↺ Reset | Clears the failure count on a source that's been erroring. |
+| ✏️ Edit | Name, feed URL, base credibility, poll interval, company. |
+| 🗑 Remove | Deletes the source **and all its articles**. The confirm step shows how many. |
+
+**Adding a feed** validates before saving: paste a URL, press *Test feed* to see
+what it parses to, then *Add source*. The type is auto-detected from the URL.
+A feed that returns zero items is rejected rather than saved broken.
+
+Anything you add or edit here is marked `meta.managedBy='user'`, so
+`npm run db:seed` will not overwrite it.
+
+For bulk changes, edit `lib/sources/registry.ts` then `npm run db:seed` — it
+upserts by slug and skips user-managed rows.
 
 Check source health:
 
@@ -120,7 +139,8 @@ psql -d latent_feed -c "update sources set enabled=true, consecutive_failures=0,
 ```
 
 Known-flaky feeds: The Information intermittently 403s, and Reddit 429s under
-load despite the 6-second per-host throttle. Both recover on their own.
+load despite the 6-second per-host throttle. Both recover on their own — the
+Reset control on `/sources` clears their failure count if it has crept up.
 
 ## Troubleshooting
 
@@ -140,7 +160,7 @@ whether one is running, and the active cron expression.
 ## Roadmap
 
 1. ✅ Foundation, ingestion, feed UI
-2. `/sources` CRUD, per-source health, custom feeds
+2. ✅ `/sources` CRUD, per-source health, custom feeds
 3. Claude enrichment, embeddings, semantic dedup
 4. Story clustering with corroboration-boosted credibility
 5. Model Radar — leak → corroboration → launch lifecycle

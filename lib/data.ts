@@ -19,6 +19,8 @@ import {
   sources,
   type ArticleCategory,
   type CredibilityReason,
+  type SourceCategory,
+  type SourceKind,
 } from "@/db/schema";
 import { PAGE_SIZE, type FeedFilters } from "@/lib/filters";
 
@@ -223,6 +225,105 @@ export async function getFacets(): Promise<{
   };
 }
 
+export interface SourceHealth {
+  id: number;
+  slug: string;
+  name: string;
+  url: string | null;
+  feedUrl: string | null;
+  kind: SourceKind;
+  category: SourceCategory;
+  baseCredibility: number;
+  orgSlug: string | null;
+  enabled: boolean;
+  mutedAt: Date | null;
+  pollMinutes: number;
+  consecutiveFailures: number;
+  disabledReason: string | null;
+  lastPolledAt: Date | null;
+  /** True once a user has edited this row, which protects it from re-seeds. */
+  managedByUser: boolean;
+  articleCount: number;
+  /** Outcome of the most recent poll. */
+  lastOk: boolean | null;
+  lastError: string | null;
+  itemsNew7d: number;
+}
+
+/**
+ * Every source with the numbers needed to judge whether it is pulling its
+ * weight: how much it has contributed, whether its last poll worked, and what
+ * broke if it didn't.
+ */
+export async function getSourcesWithHealth(): Promise<SourceHealth[]> {
+  const since = new Date(Date.now() - 7 * 86_400_000);
+
+  // Aggregates are fetched separately and merged rather than written as
+  // correlated subqueries: inside a raw `sql` fragment drizzle renders
+  // `sources.id` unqualified, so Postgres reads it as a column of the *inner*
+  // table and the query fails.
+  const [rows, articleCounts, runStats, latestRuns] = await Promise.all([
+    db.select().from(sources).orderBy(sources.category, sources.name),
+
+    db
+      .select({ sourceId: articles.sourceId, value: count() })
+      .from(articles)
+      .groupBy(articles.sourceId),
+
+    db
+      .select({
+        sourceId: ingestRuns.sourceId,
+        itemsNew: sql<number>`coalesce(sum(${ingestRuns.itemsNew}), 0)::int`,
+      })
+      .from(ingestRuns)
+      .where(gte(ingestRuns.ranAt, since))
+      .groupBy(ingestRuns.sourceId),
+
+    // DISTINCT ON is the cheap way to get the newest run per source.
+    db.execute<{ source_id: number; ok: boolean; error: string | null }>(sql`
+      select distinct on (source_id) source_id, ok, error
+      from ${ingestRuns}
+      order by source_id, ran_at desc
+    `),
+  ]);
+
+  const countBySource = new Map(
+    articleCounts.map((r) => [r.sourceId, Number(r.value)]),
+  );
+  const itemsBySource = new Map(
+    runStats.map((r) => [r.sourceId, Number(r.itemsNew)]),
+  );
+  const lastRunBySource = new Map(
+    [...latestRuns].map((r) => [r.source_id, r]),
+  );
+
+  return rows.map((s) => {
+    const lastRun = lastRunBySource.get(s.id);
+    return {
+      id: s.id,
+      slug: s.slug,
+      name: s.name,
+      url: s.url,
+      feedUrl: s.feedUrl,
+      kind: s.kind,
+      category: s.category,
+      baseCredibility: s.baseCredibility,
+      orgSlug: s.orgSlug,
+      enabled: s.enabled,
+      mutedAt: s.mutedAt,
+      pollMinutes: s.pollMinutes,
+      consecutiveFailures: s.consecutiveFailures,
+      disabledReason: s.disabledReason,
+      lastPolledAt: s.lastPolledAt,
+      managedByUser: s.meta?.managedBy === "user",
+      articleCount: countBySource.get(s.id) ?? 0,
+      lastOk: lastRun?.ok ?? null,
+      lastError: lastRun?.error ?? null,
+      itemsNew7d: itemsBySource.get(s.id) ?? 0,
+    };
+  });
+}
+
 export interface FeedStats {
   total: number;
   last24h: number;
@@ -245,7 +346,11 @@ export async function getStats(): Promise<FeedStats> {
         last24h: sql<number>`(count(*) filter (where ${gte(articles.publishedAt, since)}))::int`,
         rumours: sql<number>`(count(*) filter (where ${articles.isRumour}))::int`,
       })
-      .from(articles),
+      .from(articles)
+      // Muted sources are excluded here too, so the header counts agree with
+      // what the feed actually lists rather than reporting a larger corpus.
+      .innerJoin(sources, eq(sources.id, articles.sourceId))
+      .where(isNull(sources.mutedAt)),
     db
       .select({ ranAt: ingestRuns.ranAt })
       .from(ingestRuns)

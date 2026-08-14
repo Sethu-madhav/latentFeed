@@ -27,6 +27,13 @@ export function SiteHeader({
           </span>
         </a>
 
+        <a
+          href="/sources"
+          className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block"
+        >
+          Sources
+        </a>
+
         <Suspense fallback={<div className="flex-1" />}>
           <SearchBox initial={filters.q} />
         </Suspense>

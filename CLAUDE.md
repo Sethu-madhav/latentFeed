@@ -94,6 +94,40 @@ without JS and every view is shareable. Don't move it to client state.
   any announcement.
 - **Reddit 429s** two subreddit feeds fetched 1.5s apart; it has a 6s per-host
   override in `HOST_THROTTLE_OVERRIDES`.
+- **React resets an uncontrolled form after a `useActionState` submit.** Both
+  source forms are fully controlled for this reason — with `defaultValue`,
+  pressing "Test feed" wiped everything the user had typed, and a failed save
+  discarded their edits.
+- **Drizzle renders a column unqualified inside a raw `sql` fragment**, so
+  `sources.id` in a correlated subquery becomes `"id"` and Postgres resolves it
+  against the *inner* table. `getSourcesWithHealth` fetches its aggregates
+  separately and merges them in JS instead.
+
+## Source control (`/sources`)
+
+Two independent off-switches, and conflating them is the easiest mistake here:
+
+- **Hide** (`muted_at`) — keeps polling, drops the source out of the feed and
+  out of the header counts. Its articles still exist and still count toward
+  corroboration.
+- **Stop** (`enabled = false`) — halts polling entirely. Re-enabling also
+  clears `consecutive_failures`, because the usual reason a source is off is
+  that it auto-disabled at 5 failures and leaving the count would trip it again
+  on the next hiccup.
+
+**Delete cascades to articles.** `articles.source_id` is `on delete cascade`,
+so removing a source destroys everything it contributed; the confirm step shows
+the count and points at Stop instead. Adding the feed back does not recover
+items that have since fallen out of it.
+
+Adding a feed **probes it first** (`lib/sources/validate.ts`) and refuses
+anything that parses to zero items — a source that silently contributes nothing
+while looking healthy is the quiet failure mode this app is most prone to.
+Parser errors are translated by `humanizeProbeError`; don't surface raw xml2js
+messages in the UI.
+
+Server actions live in `app/sources/actions.ts` and revalidate both `/sources`
+and `/`.
 
 ## Conventions
 
@@ -109,7 +143,7 @@ without JS and every view is shareable. Don't move it to client state.
 
 ## Roadmap
 
-Section 1 (foundation, ingest, feed UI) is done. Next: **2** `/sources` CRUD
-and per-source health · **3** Claude enrichment + embeddings and semantic dedup
-· **4** story clustering · **5** Model Radar (leak → launch lifecycle) · **6**
-release and benchmark tracker.
+Sections 1 (foundation, ingest, feed UI) and 2 (source control) are done.
+Next: **3** Claude enrichment + embeddings and semantic dedup · **4** story
+clustering · **5** Model Radar (leak → launch lifecycle) · **6** release and
+benchmark tracker.
