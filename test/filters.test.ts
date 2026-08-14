@@ -114,3 +114,36 @@ describe("hasActiveFilters", () => {
     );
   });
 });
+
+describe("unread facet", () => {
+  it("parses and round-trips", () => {
+    expect(parseFilters({ unread: "1" }).unreadOnly).toBe(true);
+    expect(parseFilters({}).unreadOnly).toBe(false);
+    expect(buildQuery(empty, { unread: true })).toBe("?unread=1");
+  });
+
+  it("toggles off to a real href", () => {
+    const active = parseFilters({ unread: "1" });
+    expect(buildQuery(active, { unread: false })).toBe(FEED_PATH);
+  });
+
+  it("composes with other facets", () => {
+    const active = parseFilters({ unread: "1", org: "openai", cred: "4" });
+    const href = buildQuery(active, { org: "anthropic" });
+    expect(href).toContain("unread=1");
+    expect(href).toContain("cred=4");
+
+    // URLSearchParams percent-encodes the comma; it decodes back on the way in,
+    // so assert on the parsed round-trip rather than the raw string.
+    const roundTripped = parseFilters(
+      Object.fromEntries(new URLSearchParams(href.replace(/^\?/, ""))),
+    );
+    expect(roundTripped.orgs).toEqual(["openai", "anthropic"]);
+    expect(roundTripped.unreadOnly).toBe(true);
+    expect(roundTripped.minCredibility).toBe(4);
+  });
+
+  it("counts as an active filter", () => {
+    expect(hasActiveFilters(parseFilters({ unread: "1" }))).toBe(true);
+  });
+});

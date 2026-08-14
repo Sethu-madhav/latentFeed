@@ -4,6 +4,7 @@ import { CATEGORY_META } from "@/lib/enrich/classify";
 import { ORG_BY_SLUG } from "@/lib/orgs";
 import { buildQuery, type FeedFilters } from "@/lib/filters";
 import { cn, displayHost, relativeTime, truncate } from "@/lib/utils";
+import { ReadLink, SaveButton } from "./article-actions";
 import { CredibilityMeter, credibilityLabel } from "./credibility-meter";
 
 /**
@@ -38,6 +39,9 @@ export function ArticleCard({
         article.isRumour
           ? "border-clay/40 bg-clay-wash/30"
           : "border-rule hover:border-rule-strong",
+        // Read items dim rather than disappear — you still want to see what
+        // you've dismissed, and hiding them makes the grid jump around.
+        article.isRead && "opacity-55 hover:opacity-100",
       )}
     >
       {/*
@@ -71,13 +75,16 @@ export function ArticleCard({
           )}
         </div>
 
-        <time
-          dateTime={article.publishedAt.toISOString()}
-          title={article.publishedAt.toLocaleString()}
-          className="ml-auto shrink-0 font-mono text-[10.5px] tabular-nums text-ink-faint"
-        >
-          {relativeTime(article.publishedAt)}
-        </time>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <SaveButton articleId={article.id} isSaved={article.isSaved} />
+          <time
+            dateTime={article.publishedAt.toISOString()}
+            title={article.publishedAt.toLocaleString()}
+            className="font-mono text-[10.5px] tabular-nums text-ink-faint"
+          >
+            {relativeTime(article.publishedAt)}
+          </time>
+        </div>
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col px-3 pb-3 pt-2.5">
@@ -109,14 +116,14 @@ export function ArticleCard({
         </div>
 
         <h2 className="font-display text-[14.5px] leading-snug text-ink">
-          <a
+          <ReadLink
+            articleId={article.id}
             href={article.url}
-            target="_blank"
-            rel="noopener noreferrer"
+            isRead={article.isRead}
             className="line-clamp-3 decoration-clay/50 underline-offset-[3px] hover:underline"
           >
             {article.title}
-          </a>
+          </ReadLink>
         </h2>
 
         {article.summary && (

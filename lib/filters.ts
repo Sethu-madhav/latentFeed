@@ -13,6 +13,8 @@ export interface FeedFilters {
   sources: string[];
   /** Minimum credibility, 1–5. */
   minCredibility: number;
+  /** Hide anything already read. */
+  unreadOnly: boolean;
   from?: Date;
   to?: Date;
   sort: SortMode;
@@ -71,6 +73,7 @@ export function parseFilters(
       Number.isFinite(credRaw) && credRaw >= 1 && credRaw <= 5
         ? Math.floor(credRaw)
         : 1,
+    unreadOnly: first(params.unread) === "1",
     from: date(params.from),
     to: date(params.to),
     sort: sortRaw && SORT_MODES.includes(sortRaw) ? sortRaw : "newest",
@@ -87,6 +90,7 @@ export function hasActiveFilters(f: FeedFilters): boolean {
       f.tags.length ||
       f.sources.length ||
       f.minCredibility > 1 ||
+      f.unreadOnly ||
       f.from ||
       f.to,
   );
@@ -107,6 +111,7 @@ export function buildQuery(
     cred: number;
     sort: SortMode;
     page: number;
+    unread: boolean;
     from: string | undefined;
     to: string | undefined;
     clear: true;
@@ -138,6 +143,9 @@ export function buildQuery(
 
   const cred = change.cred ?? current.minCredibility;
   if (cred > 1) params.set("cred", String(cred));
+
+  const unread = "unread" in change ? change.unread : current.unreadOnly;
+  if (unread) params.set("unread", "1");
 
   const from = "from" in change ? change.from : current.from?.toISOString().slice(0, 10);
   const to = "to" in change ? change.to : current.to?.toISOString().slice(0, 10);

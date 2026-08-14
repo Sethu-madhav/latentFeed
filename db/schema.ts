@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { ModelStatus } from "@/lib/enrich/models";
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -329,6 +330,56 @@ export const modelMentions = pgTable(
 );
 
 export type ModelRow = typeof models.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Reader state.
+//
+// Single-reader by design: the whole app sits behind one password, so there is
+// no user column to thread through every query and state syncs across devices
+// for free. If this ever becomes multi-reader, these three tables are where a
+// user id goes.
+// ---------------------------------------------------------------------------
+export const articleReads = pgTable("article_reads", {
+  articleId: uuid("article_id")
+    .primaryKey()
+    .references(() => articles.id, { onDelete: "cascade" }),
+  readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const savedArticles = pgTable("saved_articles", {
+  articleId: uuid("article_id")
+    .primaryKey()
+    .references(() => articles.id, { onDelete: "cascade" }),
+  savedAt: timestamp("saved_at", { withTimezone: true }).notNull().defaultNow(),
+  note: text("note"),
+});
+
+/** One row, id = 1. Holds the watermark for "new since your last visit". */
+export const readerState = pgTable("reader_state", {
+  id: integer("id").primaryKey().default(1),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// digests — the generated morning brief, one per day.
+// ---------------------------------------------------------------------------
+export const digests = pgTable("digests", {
+  /** Date the brief covers, so regenerating a day overwrites rather than duplicates. */
+  day: date("day").primaryKey(),
+  title: text("title").notNull(),
+  bodyMarkdown: text("body_markdown").notNull(),
+  /** Which model wrote it, or 'heuristic' for the no-key fallback. */
+  model: text("model").notNull(),
+  /** Articles it drew on, validated against the candidate set before saving. */
+  articleIds: uuid("article_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type Digest = typeof digests.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // retired_sources — stock feeds the user has deliberately removed.

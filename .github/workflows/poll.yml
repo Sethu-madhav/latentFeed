@@ -1,0 +1,49 @@
+name: poll
+
+# Every 30 minutes. GitHub delays scheduled runs under load, often by 5–15
+# minutes, so don't tighten this expecting precision — the per-source
+# pollMinutes throttle makes an early or late run harmless either way.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+# A late run must never overlap a running one; the ingest cycle is not
+# re-entrant across processes.
+concurrency:
+  group: poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      INGEST_USER_AGENT: "latentFeed/1.0 (+https://github.com/${{ github.repository }})"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # Same CLIs the local worker runs, so there is one implementation of
+      # each job rather than a second copy living in YAML.
+      - name: Ingest
+        run: npm run ingest:once
+
+      - name: Enrich
+        run: npm run enrich:once
+
+      # Clustering must precede the radar: the radar reads story membership.
+      - name: Cluster
+        run: npm run cluster:once
+
+      - name: Radar
+        run: npm run radar:once

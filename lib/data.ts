@@ -14,12 +14,16 @@ import {
 import { db } from "@/db/client";
 import {
   articleDuplicates,
+  articleReads,
   articles,
+  digests,
   ingestRuns,
   modelMentions,
   models,
   orgs,
+  readerState,
   retiredSources,
+  savedArticles,
   sources,
   stories,
   type ArticleCategory,
@@ -61,6 +65,8 @@ export interface FeedArticle {
   storyId: string | null;
   /** Distinct outlets covering that story, including this one. */
   storySourceCount: number | null;
+  isRead: boolean;
+  isSaved: boolean;
 }
 
 /** The weighted tsvector — must mirror articles_search_idx to use it. */
@@ -96,6 +102,8 @@ function buildWhere(f: FeedFilters): SQL[] {
   if (f.minCredibility > 1) {
     clauses.push(gte(articles.credibility, f.minCredibility));
   }
+  // Unread joins the same URL vocabulary as every other facet.
+  if (f.unreadOnly) clauses.push(isNull(articleReads.articleId));
   if (f.from) clauses.push(gte(articles.publishedAt, f.from));
   if (f.to) clauses.push(lte(articles.publishedAt, f.to));
 
@@ -148,10 +156,14 @@ export async function getFeed(
         enrichedBy: articles.enrichedBy,
         storyId: articles.storyId,
         storySourceCount: stories.sourceCount,
+        isRead: sql<boolean>`${articleReads.articleId} is not null`,
+        isSaved: sql<boolean>`${savedArticles.articleId} is not null`,
       })
       .from(articles)
       .innerJoin(sources, eq(sources.id, articles.sourceId))
       .leftJoin(stories, eq(stories.id, articles.storyId))
+      .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+      .leftJoin(savedArticles, eq(savedArticles.articleId, articles.id))
       .where(where)
       .orderBy(...orderFor(f))
       .limit(PAGE_SIZE)
@@ -160,6 +172,7 @@ export async function getFeed(
       .select({ value: count() })
       .from(articles)
       .innerJoin(sources, eq(sources.id, articles.sourceId))
+      .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
       .where(where),
   ]);
 
@@ -392,9 +405,13 @@ export async function getStory(id: string): Promise<StoryDetail | null> {
       enrichedBy: articles.enrichedBy,
       storyId: articles.storyId,
       storySourceCount: sql<number>`${story.sourceCount}`,
+      isRead: sql<boolean>`${articleReads.articleId} is not null`,
+      isSaved: sql<boolean>`${savedArticles.articleId} is not null`,
     })
     .from(articles)
     .innerJoin(sources, eq(sources.id, articles.sourceId))
+    .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+    .leftJoin(savedArticles, eq(savedArticles.articleId, articles.id))
     .where(eq(articles.storyId, id))
     .orderBy(articles.publishedAt);
 
@@ -518,11 +535,15 @@ export async function getModelTimeline(slug: string): Promise<FeedArticle[]> {
       enrichedBy: articles.enrichedBy,
       storyId: articles.storyId,
       storySourceCount: stories.sourceCount,
+      isRead: sql<boolean>`${articleReads.articleId} is not null`,
+      isSaved: sql<boolean>`${savedArticles.articleId} is not null`,
     })
     .from(modelMentions)
     .innerJoin(articles, eq(articles.id, modelMentions.articleId))
     .innerJoin(sources, eq(sources.id, articles.sourceId))
     .leftJoin(stories, eq(stories.id, articles.storyId))
+    .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+    .leftJoin(savedArticles, eq(savedArticles.articleId, articles.id))
     .where(eq(modelMentions.modelSlug, slug))
     .orderBy(articles.publishedAt);
 }
@@ -619,6 +640,100 @@ export async function getReleases(): Promise<ReleaseProject[]> {
   return projects.sort(
     (a, b) => b.latest.publishedAt.getTime() - a.latest.publishedAt.getTime(),
   );
+}
+
+/** Starred items, most recently saved first. */
+export async function getSaved(): Promise<FeedArticle[]> {
+  return db
+    .select({
+      id: articles.id,
+      url: articles.url,
+      title: articles.title,
+      summary: articles.summary,
+      publishedAt: articles.publishedAt,
+      category: articles.category,
+      credibility: articles.credibility,
+      credibilityReason: articles.credibilityReason,
+      isRumour: articles.isRumour,
+      impact: articles.impact,
+      orgSlugs: articles.orgSlugs,
+      tags: articles.tags,
+      corroborationCount: articles.corroborationCount,
+      publisherDomain: articles.publisherDomain,
+      sourceName: sources.name,
+      sourceSlug: sources.slug,
+      enrichedBy: articles.enrichedBy,
+      storyId: articles.storyId,
+      storySourceCount: stories.sourceCount,
+      isRead: sql<boolean>`${articleReads.articleId} is not null`,
+      isSaved: sql<boolean>`true`,
+    })
+    .from(savedArticles)
+    .innerJoin(articles, eq(articles.id, savedArticles.articleId))
+    .innerJoin(sources, eq(sources.id, articles.sourceId))
+    .leftJoin(stories, eq(stories.id, articles.storyId))
+    .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+    .orderBy(desc(savedArticles.savedAt));
+}
+
+export interface ReaderCounts {
+  /** Articles published since the watermark was last moved. */
+  newSinceLastVisit: number;
+  unread: number;
+  saved: number;
+  lastSeenAt: Date | null;
+}
+
+/**
+ * Counts for the header. `newSinceLastVisit` is measured against the stored
+ * watermark rather than read state, so it answers "what landed while I was
+ * away" even for items you never opened.
+ */
+export async function getReaderCounts(): Promise<ReaderCounts> {
+  const [state] = await db
+    .select({ lastSeenAt: readerState.lastSeenAt })
+    .from(readerState)
+    .where(eq(readerState.id, 1))
+    .limit(1);
+
+  const since = state?.lastSeenAt ?? new Date(0);
+
+  const [[fresh], [unread], [saved]] = await Promise.all([
+    db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(articles)
+      .innerJoin(sources, eq(sources.id, articles.sourceId))
+      .where(and(isNull(sources.mutedAt), gte(articles.ingestedAt, since))),
+    db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(articles)
+      .innerJoin(sources, eq(sources.id, articles.sourceId))
+      .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+      .where(and(isNull(sources.mutedAt), isNull(articleReads.articleId))),
+    db.select({ value: sql<number>`count(*)::int` }).from(savedArticles),
+  ]);
+
+  return {
+    newSinceLastVisit: Number(fresh?.value ?? 0),
+    unread: Number(unread?.value ?? 0),
+    saved: Number(saved?.value ?? 0),
+    lastSeenAt: state?.lastSeenAt ?? null,
+  };
+}
+
+/** Recent briefs, newest first. */
+export async function getDigests(limit = 30) {
+  return db.select().from(digests).orderBy(desc(digests.day)).limit(limit);
+}
+
+/** One brief by its day key (YYYY-MM-DD). */
+export async function getDigest(day: string) {
+  const [row] = await db
+    .select()
+    .from(digests)
+    .where(eq(digests.day, day))
+    .limit(1);
+  return row ?? null;
 }
 
 export interface RetiredSource {

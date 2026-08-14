@@ -2,7 +2,7 @@ import { ArticleCard } from "@/components/article-card";
 import { FilterRail } from "@/components/filter-rail";
 import { Pagination } from "@/components/pagination";
 import { SiteHeader } from "@/components/site-header";
-import { getFacets, getFeed, getStats } from "@/lib/data";
+import { getFacets, getFeed, getReaderCounts, getStats } from "@/lib/data";
 import { hasActiveFilters, parseFilters } from "@/lib/filters";
 import { cn } from "@/lib/utils";
 
@@ -17,15 +17,16 @@ export default async function FeedPage({
 }) {
   const filters = parseFilters(await searchParams);
 
-  const [{ items, total }, facets, stats] = await Promise.all([
+  const [{ items, total }, facets, stats, reader] = await Promise.all([
     getFeed(filters),
     getFacets(),
     getStats(),
+    getReaderCounts(),
   ]);
 
   return (
     <div className="min-h-screen">
-      <SiteHeader filters={filters} stats={stats} />
+      <SiteHeader filters={filters} stats={stats} reader={reader} />
 
       <div className="grid lg:grid-cols-[236px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
