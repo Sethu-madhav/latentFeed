@@ -87,6 +87,15 @@ opaque score is worse than none here.
 into `article_duplicates` and re-runs the scorer. That is how a rumour earns
 its way toward confirmed.
 
+**An outlet is a publisher, not a feed.** A Google News query is one `sources`
+row but delivers many publishers. Keying corroboration on `source_id` counted a
+syndicated story carried by 11 different local stations as a *single* outlet,
+and dedup discarded ten of them as "same source" — badly understating
+corroboration, and therefore credibility, for everything arriving via
+aggregators. Identity is `publisher_domain ?? source_id`; see `sameOutlet` in
+`worker/ingest.ts` and `countDistinctOutlets` in `worker/cluster.ts`. Fixing
+this moved one story from 1 source to 10 and re-scored 123 articles.
+
 **`corroboration_count` is derived, never incremented.** It is recomputed as
 `max(distinct outlets in article_duplicates, story.source_count − 1)`. An
 incrementing counter drifted upward every time a feed re-served an item
@@ -153,6 +162,13 @@ without JS and every view is shareable. Don't move it to client state.
 - **The gpt-5 family rejects `temperature`**, so `structuredCompletion` doesn't
   send it. Structured output uses `response_format: json_schema` with
   `strict: true`.
+- **OpenAI's free shared-traffic tier covers chat models only.** The mini/nano
+  models get the large daily allowance and `gpt-5.4-mini` is the default for
+  that reason, but *no embedding model is included* — embeddings always draw on
+  real credit. Being "eligible" for the free tier is not the same as being
+  enrolled: until data sharing is enabled for the specific **project** the
+  `sk-proj-…` key belongs to, every call returns `429 insufficient_quota /
+  credit_balance_exhausted`, even for a listed model.
 - **Don't run `npm run build` while `next dev` is running.** The build rewrites
   `.next`, invalidating the running dev server's chunk hashes; the page then
   404s on `_next/static/chunks/*` and throws bogus `ReferenceError`s for

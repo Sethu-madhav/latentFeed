@@ -34,9 +34,16 @@ export const env = {
   // Everything below is optional. With no key the app runs exactly as it did
   // in Sections 1–2: heuristic enrichment and title-similarity dedup.
   openaiApiKey: process.env.OPENAI_API_KEY?.trim() || null,
-  /** Chat model for the enrichment pass. */
-  enrichmentModel: process.env.OPENAI_ENRICHMENT_MODEL ?? "gpt-5-mini",
-  /** 1536 dims, which is what the articles.embedding column is declared as. */
+  /**
+   * Chat model for the enrichment pass. Defaults to a mini model because
+   * those carry the larger free daily allowance on shared traffic.
+   */
+  enrichmentModel: process.env.OPENAI_ENRICHMENT_MODEL ?? "gpt-5.4-mini",
+  /**
+   * 1536 dims, which is what the articles.embedding column is declared as.
+   * Note embedding models are *not* covered by the free shared-traffic tiers,
+   * so this one always draws on real credit — a few cents for the backlog.
+   */
   embeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
   disableLlm: process.env.DISABLE_LLM === "1",
   disableEmbeddings: process.env.DISABLE_EMBEDDINGS === "1",

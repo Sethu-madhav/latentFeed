@@ -154,19 +154,31 @@ export async function runClusterCycle(): Promise<ClusterSummary> {
 }
 
 /**
- * Distinct outlets covering a story: the members' own sources plus any outlets
+ * Distinct outlets covering a story: the members' own publishers plus any
  * recorded against them as duplicates during ingestion.
+ *
+ * Keyed on publisher domain rather than source id. A Google News query is one
+ * source row but delivers many publishers — counting feeds reported a
+ * syndicated story carried by 11 local stations as a single outlet, which
+ * understates corroboration and therefore credibility.
  */
 async function countDistinctOutlets(members: Row[]): Promise<number> {
-  const direct = new Set(members.map((m) => m.sourceId));
+  const outlets = new Set(
+    members.map((m) => m.publisherDomain ?? `source:${m.sourceId}`),
+  );
 
   const dupes = await db
-    .select({ sourceId: articleDuplicates.sourceId })
+    .select({
+      sourceId: articleDuplicates.sourceId,
+      publisherDomain: articleDuplicates.publisherDomain,
+    })
     .from(articleDuplicates)
     .where(inArray(articleDuplicates.articleId, members.map((m) => m.id)));
 
-  for (const dupe of dupes) direct.add(dupe.sourceId);
-  return direct.size;
+  for (const dupe of dupes) {
+    outlets.add(dupe.publisherDomain ?? `source:${dupe.sourceId}`);
+  }
+  return outlets.size;
 }
 
 /**

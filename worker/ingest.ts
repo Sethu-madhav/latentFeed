@@ -145,7 +145,30 @@ type StoreOutcome = "inserted" | "duplicate" | "skipped";
 interface DuplicateMatch {
   id: string;
   sourceId: number;
+  publisherDomain: string | null;
   similarity: number;
+}
+
+/**
+ * Whether an incoming item comes from the same outlet as the article it
+ * matched. Falls back to the feed only when neither side names a publisher.
+ */
+export function sameOutlet(
+  match: { sourceId: number; publisherDomain: string | null },
+  source: { id: number },
+  item: { publisherDomain?: string | null },
+): boolean {
+  if (item.publisherDomain && match.publisherDomain) {
+    return item.publisherDomain === match.publisherDomain;
+  }
+  // One side is a direct feed with no separate publisher: same row means
+  // the same outlet.
+  if (!item.publisherDomain && !match.publisherDomain) {
+    return match.sourceId === source.id;
+  }
+  // Mixed — an aggregator's copy of a story we hold directly, or vice versa.
+  // Different provenance, so treat them as different outlets.
+  return false;
 }
 
 /**
@@ -166,6 +189,7 @@ async function findSemanticDuplicate(
     .select({
       id: articles.id,
       sourceId: articles.sourceId,
+      publisherDomain: articles.publisherDomain,
       distance: sql<number>`${articles.embedding} <=> ${literal}::vector`,
     })
     .from(articles)
@@ -186,6 +210,7 @@ async function findSemanticDuplicate(
   return {
     id: match.id,
     sourceId: match.sourceId,
+    publisherDomain: match.publisherDomain,
     similarity: 1 - Number(match.distance),
   };
 }
@@ -200,6 +225,7 @@ async function findTitleDuplicate(
       id: articles.id,
       title: articles.title,
       sourceId: articles.sourceId,
+      publisherDomain: articles.publisherDomain,
     })
     .from(articles)
     .where(gte(articles.publishedAt, since))
@@ -211,6 +237,7 @@ async function findTitleDuplicate(
     ? {
         id: hit.match.id,
         sourceId: hit.match.sourceId,
+        publisherDomain: hit.match.publisherDomain,
         similarity: hit.similarity,
       }
     : null;
@@ -259,9 +286,14 @@ async function storeItem(
     : await findTitleDuplicate(item.title, since);
 
   if (duplicate) {
-    // Only a *different* outlet counts as corroboration; the same feed
-    // rewording its own headline proves nothing.
-    if (duplicate.sourceId === source.id) return "skipped";
+    // Only a *different* outlet counts as corroboration; one outlet rewording
+    // its own headline proves nothing.
+    //
+    // Identity is the publisher, not the feed. A Google News query is a single
+    // source row but delivers many publishers — one syndicated wire story
+    // arrived through it from 11 different local stations — so comparing feeds
+    // would throw away ten genuine corroborations as "same source".
+    if (sameOutlet(duplicate, source, item)) return "skipped";
 
     const inserted = await db
       .insert(articleDuplicates)
@@ -325,9 +357,11 @@ async function storeItem(
  * the credibility score, so drift there quietly inflates trust.
  */
 export async function recomputeCorroboration(articleId: string): Promise<void> {
+  // Count publishers, not feeds: several publishers reach us through one
+  // aggregator query, and they are independent corroboration.
   const [{ outlets }] = await db
     .select({
-      outlets: sql<number>`count(distinct ${articleDuplicates.sourceId})::int`,
+      outlets: sql<number>`count(distinct coalesce(${articleDuplicates.publisherDomain}, ${articleDuplicates.sourceId}::text))::int`,
     })
     .from(articleDuplicates)
     .where(eq(articleDuplicates.articleId, articleId));

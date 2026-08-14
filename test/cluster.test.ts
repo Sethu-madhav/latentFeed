@@ -8,6 +8,7 @@ import {
   type Clusterable,
 } from "@/lib/enrich/cluster";
 import { DUPLICATE_THRESHOLD } from "@/lib/enrich/dedup";
+import { sameOutlet } from "@/worker/ingest";
 
 let seq = 0;
 function article(title: string, sourceId = ++seq, embedding?: number[]): Clusterable {
@@ -127,6 +128,50 @@ describe("clusterArticles", () => {
       article("OpenAI launches GPT-6 model"),
     ]);
     expect(plain[0].usedEmbeddings).toBe(false);
+  });
+});
+
+describe("sameOutlet", () => {
+  const feed = { id: 7 };
+
+  it("treats two publishers behind one aggregator query as different outlets", () => {
+    // A Google News query is a single source row but delivers many
+    // publishers. Comparing feeds threw away real corroboration: one
+    // syndicated story reached us from 11 local stations through one query.
+    expect(
+      sameOutlet(
+        { sourceId: 7, publisherDomain: "kxan.com" },
+        feed,
+        { publisherDomain: "abc7amarillo.com" },
+      ),
+    ).toBe(false);
+  });
+
+  it("still catches one publisher repeating itself", () => {
+    expect(
+      sameOutlet(
+        { sourceId: 7, publisherDomain: "kxan.com" },
+        feed,
+        { publisherDomain: "kxan.com" },
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to the feed when neither side names a publisher", () => {
+    expect(sameOutlet({ sourceId: 7, publisherDomain: null }, feed, {})).toBe(
+      true,
+    );
+    expect(sameOutlet({ sourceId: 9, publisherDomain: null }, feed, {})).toBe(
+      false,
+    );
+  });
+
+  it("counts an aggregator's copy of a direct feed as a separate outlet", () => {
+    expect(
+      sameOutlet({ sourceId: 3, publisherDomain: null }, feed, {
+        publisherDomain: "theverge.com",
+      }),
+    ).toBe(false);
   });
 });
 

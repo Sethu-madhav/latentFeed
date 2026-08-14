@@ -28,7 +28,7 @@ npm run dev              # web on :3000, worker on :8788
 | `WORKER_PORT` | `8788` | Health endpoint (`/healthz`). |
 | `DISABLE_INGEST` | unset | Set to `1` to stop polling; the web app still serves. |
 | `OPENAI_API_KEY` | unset | Turns on embeddings and LLM enrichment. Everything works without it. |
-| `OPENAI_ENRICHMENT_MODEL` | `gpt-5-mini` | Chat model for the enrichment pass. |
+| `OPENAI_ENRICHMENT_MODEL` | `gpt-5.4-mini` | Chat model for the enrichment pass. |
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Must be 1536-dim to match the column. |
 | `ENRICH_CRON` | `*/10 * * * *` | Enrichment schedule. |
 | `ENRICH_BATCH_SIZE` | `40` | Articles per enrichment cycle — the cost dial. |
@@ -204,6 +204,23 @@ articles you're actually reading get upgraded first.
 **Changing the embedding model** makes existing vectors incomparable — they're
 filtered out of dedup by `embedding_model` rather than silently mismatched.
 Re-run `npm run embed:backfill all` after any change.
+
+### If every call returns `insufficient_quota`
+
+OpenAI's free daily allowance applies to *traffic shared with OpenAI*, and only
+to chat models — the mini/nano tier gets the larger allowance, which is why
+`gpt-5.4-mini` is the default. Two things catch people out:
+
+- **Eligible ≠ enrolled.** Data sharing has to be switched on, and for a
+  `sk-proj-…` key it must be on for that key's **project**, not just the org.
+  Until then even a listed model returns
+  `429 insufficient_quota / credit_balance_exhausted`.
+- **No embedding model is covered.** `text-embedding-3-small` always bills.
+  It is very cheap — embedding a ~1,000-article backlog is roughly 200K tokens,
+  well under a cent — but it needs a non-zero balance.
+
+Nothing here is required: with no working key the app runs on heuristics,
+title-similarity dedup and title-based clustering, exactly as it did before.
 
 ## Story clustering
 
