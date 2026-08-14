@@ -1,0 +1,37 @@
+name: digest
+
+# 07:00 UTC daily. Runs after the night's polls have landed, so the brief
+# covers a full 24 hours.
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "Day to (re)generate, YYYY-MM-DD. Blank means today."
+        required: false
+
+concurrency:
+  group: digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Write the brief
+        run: npm run digest:once ${{ github.event.inputs.day }}

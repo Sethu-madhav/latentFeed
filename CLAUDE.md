@@ -35,6 +35,7 @@ npm run embed:backfill   # embed rows with no vector; `all` drains
 npm run cluster:once     # regroup the last 7 days into stories
 npm run rescore          # re-run the credibility scorer over every article
 npm run radar:once       # rebuild the model radar (leak → launch)
+npm run digest:once      # write today's brief; pass YYYY-MM-DD for a past day
 # /releases needs no job — it reads the ingested GitHub release articles
 npm run embed:backfill force   # re-embed everything (after enrichment rewrites summaries)
 npm run test             # vitest
@@ -194,6 +195,37 @@ cards, papers and leaderboards, not news headlines, and the arXiv feeds that
 carried them were removed for volume. Building extraction for two data points
 would have been waste. If it is revisited, add leaderboard or model-card
 sources *first* and confirm the data exists.
+
+## Reader state and the brief
+
+**Single reader by design.** The app sits behind one shared password
+(`APP_PASSWORD` + `middleware.ts`), so `article_reads`, `saved_articles` and
+`reader_state` carry no user column and state syncs across devices for free.
+That is where a user id goes if it ever becomes multi-reader.
+
+**Marking read must never block the click.** `ReadLink` fires the action
+without awaiting it — the browser is already opening the publisher. Losing a
+read mark is recoverable; a click that stalls is not.
+
+**The digest picks one article per story** before it calls the model. A launch
+covered by 21 outlets would otherwise fill the whole brief with one event.
+Citations coming back from the model are validated against the candidate set,
+so a brief can never link an article that wasn't in scope.
+
+**With no key the digest still writes**, falling back to the top items by
+impact — same degradation contract as enrichment and embeddings.
+
+## Deployment shape
+
+Web on Vercel, Postgres on Neon, and the poller as **GitHub Actions running the
+existing CLIs** — serverless cannot host a long-lived worker, so production
+schedules the same jobs rather than reimplementing them. `worker/index.ts` is
+unchanged and still what `npm run dev` uses.
+
+- **Use Neon's pooled connection string.** `db/client.ts` drops to `max: 1`
+  under `VERCEL` because each serverless instance otherwise opens its own pool.
+- **Scheduled workflows only run on the default branch.** This repo is on
+  `master`; if the remote defaults to `main`, the cron silently never fires.
 
 ## Gotchas that cost time
 

@@ -33,6 +33,23 @@ npm run dev              # web on :3000, worker on :8788
 | `ENRICH_CRON` | `*/10 * * * *` | Enrichment schedule. |
 | `ENRICH_BATCH_SIZE` | `40` | Articles per enrichment cycle — the cost dial. |
 | `DISABLE_LLM` / `DISABLE_EMBEDDINGS` | unset | Switch off either half. |
+| `APP_PASSWORD` | unset | Gates the whole app when set. Leave blank locally. |
+
+## Reading
+
+The feed remembers what you've seen. Opening an article marks it read and the
+card dims — read items are dimmed rather than hidden, so you can still see what
+you passed over. The star on each card saves it to `/saved`.
+
+The header carries the counts: **N new** since your last visit (click to
+dismiss and move the watermark), **N unread** (click to mark everything read),
+and an `all` / `unread only` toggle that composes with every other filter as
+`?unread=1`.
+
+`/digest` is the morning brief — the last 24 hours compressed to a handful of
+items, one per story so a launch covered by twenty outlets doesn't fill it.
+Generate it with `npm run digest:once [YYYY-MM-DD]`. With no API key it still
+works, falling back to the top items ranked by impact.
 
 ## How it works
 
@@ -300,6 +317,71 @@ it was dropped rather than built against no data. Benchmark numbers live in
 model cards, papers and leaderboards; adding those sources is the prerequisite
 if you want it later.
 
+## Deploying
+
+Three services. Everything below is a one-time setup.
+
+### 1. Neon (Postgres)
+
+Create a project, then from the SQL editor:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Copy the **pooled** connection string — the host contains `-pooler`. The
+unpooled one will exhaust connections from serverless. Then, locally:
+
+```bash
+DATABASE_URL='<neon pooled url>' npm run db:migrate
+DATABASE_URL='<neon pooled url>' npm run db:seed
+```
+
+### 2. GitHub (the poller)
+
+The worker is a long-running process, which serverless can't host, so
+production runs the same CLIs on a schedule instead. `worker/index.ts` is
+untouched and still used by `npm run dev`.
+
+Push the repo, then add two **repository secrets** (Settings → Secrets and
+variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `DATABASE_URL` | the Neon pooled URL |
+| `OPENAI_API_KEY` | your key, same as `.env` |
+
+`.github/workflows/poll.yml` runs every 30 minutes (ingest → enrich → cluster →
+radar) and `digest.yml` writes the brief at 07:00 UTC. Both have
+`workflow_dispatch`, so you can trigger them by hand from the Actions tab.
+
+**Scheduled workflows only run on the repository's default branch.** This repo
+is on `master`; if GitHub creates the remote with `main` as default, the cron
+silently never fires. Check Settings → Branches after pushing.
+
+### 3. Vercel (the web app)
+
+Import the repo. No build configuration is needed — it's a stock Next.js app.
+Set three environment variables:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | the Neon pooled URL |
+| `OPENAI_API_KEY` | your key |
+| `APP_PASSWORD` | a password of your choosing |
+
+`APP_PASSWORD` gates the whole app through `middleware.ts`. Leave it unset
+locally and the app stays open; set it and every route redirects to `/login`
+until the password is entered. The session is a signed cookie, good for 90
+days, so your read and saved state follows you between laptop and phone.
+
+### Verifying a deploy
+
+1. Actions tab → run **poll** manually → it should finish green.
+2. Article count in Neon rises.
+3. Open the Vercel URL → redirected to `/login` → sign in → the feed loads.
+4. Actions tab → run **digest** manually → `/digest` shows today's brief.
+
 ## Roadmap
 
 1. ✅ Foundation, ingestion, feed UI
@@ -308,3 +390,4 @@ if you want it later.
 4. ✅ Story clustering with corroboration-boosted credibility
 5. ✅ Model Radar — leak → corroboration → launch lifecycle
 6. ✅ Release tracker (benchmarks dropped — see below)
+7. ✅ Read state, saved items, daily brief, deployment
