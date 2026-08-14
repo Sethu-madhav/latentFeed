@@ -29,6 +29,13 @@ import {
 } from "@/db/schema";
 import { PAGE_SIZE, type FeedFilters } from "@/lib/filters";
 import type { ModelStatus } from "@/lib/enrich/models";
+import {
+  parseTag,
+  projectName,
+  releasesPerWeek,
+  repoFromReleaseUrl,
+  tagFromUrl,
+} from "@/lib/releases";
 import { SOURCE_REGISTRY } from "@/lib/sources/registry";
 
 export interface FeedArticle {
@@ -518,6 +525,100 @@ export async function getModelTimeline(slug: string): Promise<FeedArticle[]> {
     .leftJoin(stories, eq(stories.id, articles.storyId))
     .where(eq(modelMentions.modelSlug, slug))
     .orderBy(articles.publishedAt);
+}
+
+export interface ReleaseItem {
+  id: string;
+  url: string;
+  tag: string;
+  version: string;
+  channel: string | null;
+  isPrerelease: boolean;
+  isBuild: boolean;
+  publishedAt: Date;
+  summary: string | null;
+}
+
+export interface ReleaseProject {
+  repo: string;
+  name: string;
+  orgSlug: string | null;
+  sourceSlug: string;
+  latest: ReleaseItem;
+  releases: ReleaseItem[];
+  /** Releases per week across the observed span. */
+  cadence: number;
+  last7d: number;
+}
+
+/**
+ * Shipping activity for every tracked repo, most recently released first.
+ *
+ * Derived from the articles themselves rather than a separate table: a release
+ * is fully described by its URL, so there is nothing to store that ingestion
+ * hasn't already captured.
+ */
+export async function getReleases(): Promise<ReleaseProject[]> {
+  const rows = await db
+    .select({
+      id: articles.id,
+      url: articles.url,
+      summary: articles.summary,
+      publishedAt: articles.publishedAt,
+      orgSlug: sources.orgSlug,
+      sourceSlug: sources.slug,
+    })
+    .from(articles)
+    .innerJoin(sources, eq(sources.id, articles.sourceId))
+    .where(eq(sources.kind, "github_releases"))
+    .orderBy(desc(articles.publishedAt));
+
+  const byRepo = new Map<string, ReleaseProject>();
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+
+  for (const row of rows) {
+    const repo = repoFromReleaseUrl(row.url);
+    const tag = tagFromUrl(row.url);
+    if (!repo || !tag) continue;
+
+    const parsed = parseTag(tag);
+    const item: ReleaseItem = {
+      id: row.id,
+      url: row.url,
+      tag,
+      ...parsed,
+      publishedAt: row.publishedAt,
+      summary: row.summary,
+    };
+
+    const existing = byRepo.get(repo);
+    if (existing) {
+      existing.releases.push(item);
+      if (row.publishedAt >= weekAgo) existing.last7d++;
+      continue;
+    }
+
+    byRepo.set(repo, {
+      repo,
+      name: projectName(repo),
+      orgSlug: row.orgSlug,
+      sourceSlug: row.sourceSlug,
+      // Rows arrive newest-first, so the first seen is the latest.
+      latest: item,
+      releases: [item],
+      cadence: 0,
+      last7d: row.publishedAt >= weekAgo ? 1 : 0,
+    });
+  }
+
+  const projects = [...byRepo.values()];
+  for (const project of projects) {
+    project.cadence = releasesPerWeek(project.releases.map((r) => r.publishedAt));
+  }
+
+  return projects.sort(
+    (a, b) => b.latest.publishedAt.getTime() - a.latest.publishedAt.getTime(),
+  );
 }
 
 export interface RetiredSource {

@@ -37,6 +37,18 @@ export default async function SourcesPage() {
             >
               Feed
             </a>
+            <a
+              href="/radar"
+              className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
+            >
+              Radar
+            </a>
+            <a
+              href="/releases"
+              className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
+            >
+              Releases
+            </a>
             <span className="rounded-md bg-paper-sunken px-2 py-1 font-medium text-ink">
               Sources
             </span>

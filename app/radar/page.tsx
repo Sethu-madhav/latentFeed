@@ -35,6 +35,12 @@ export default async function RadarPage() {
               Radar
             </span>
             <a
+              href="/releases"
+              className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
+            >
+              Releases
+            </a>
+            <a
               href="/sources"
               className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
             >

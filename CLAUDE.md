@@ -35,6 +35,7 @@ npm run embed:backfill   # embed rows with no vector; `all` drains
 npm run cluster:once     # regroup the last 7 days into stories
 npm run rescore          # re-run the credibility scorer over every article
 npm run radar:once       # rebuild the model radar (leak → launch)
+# /releases needs no job — it reads the ingested GitHub release articles
 npm run embed:backfill force   # re-embed everything (after enrichment rewrites summaries)
 npm run test             # vitest
 npm run typecheck        # tsc --noEmit
@@ -173,6 +174,27 @@ Three guards earn their keep, each added after a real false positive:
   producing "Qwen 3". The version must swallow all its digits — hence the
   `(?!\d)` before the size guard. Removing it silently resurrects the bug.
 
+## Releases (`/releases`)
+
+Shipping activity for the tracked harnesses and inference engines, derived
+from the `github_releases` articles at query time. **No table backs this** —
+a release is fully described by its URL, so there is nothing to store that
+ingestion hasn't captured; `lib/releases.ts` parses it.
+
+**Nothing here may assume semver.** The tracked repos use four conventions:
+`v2.1.232` (claude-code), `rust-v0.148.0-alpha.17` (codex — component prefix),
+`b10434` (llama.cpp build counters, many per day) and `v0.27.2rc0` (vllm,
+no separator before the rc marker). Prereleases are detected from the channel
+word, and a bare letter-plus-digits tag is treated as a build rather than a
+version — otherwise `b10434` reads as a beta.
+
+**Benchmarks were deliberately dropped from this section.** Only 3 of ~1,000
+articles named a benchmark and 2 carried a score: the numbers live in model
+cards, papers and leaderboards, not news headlines, and the arXiv feeds that
+carried them were removed for volume. Building extraction for two data points
+would have been waste. If it is revisited, add leaderboard or model-card
+sources *first* and confirm the data exists.
+
 ## Gotchas that cost time
 
 - **rss-parser returns non-strings.** An element with attributes parses to
@@ -277,8 +299,8 @@ and `/`.
 
 Sections 1 (foundation, ingest, feed UI), 2 (source control), 3 (OpenAI
 enrichment, embeddings, semantic dedup) and 4 (story clustering) are done.
-Section 5 (Model Radar) is done too. Next: **6** release and benchmark
-tracker.
+All six sections are done. Benchmarks were dropped from Section 6 for lack
+of data (see Releases above); everything else shipped.
 
 **Feed layout:** a responsive card grid (1 / 2 / 3 / 4 columns). Two things
 about it are load-bearing:

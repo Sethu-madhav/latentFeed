@@ -35,6 +35,13 @@ export function SiteHeader({
         </a>
 
         <a
+          href="/releases"
+          className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block"
+        >
+          Releases
+        </a>
+
+        <a
           href="/sources"
           className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block"
         >

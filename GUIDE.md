@@ -283,6 +283,23 @@ earns its place — Grok 4.6 reads: leaked in Cursor and pulled within hours
 (unverified) → Musk confirms the release window (reported) → "Grok 4.6 is
 coming" → shipped.
 
+## Releases
+
+`/releases` shows shipping activity for the tracked harnesses and inference
+engines: latest version, how recently, cadence, and the last few tags.
+Pre-releases (`alpha`, `rc`) are marked in clay so a nightly isn't mistaken for
+a stable cut, and llama.cpp's build counters (`b10434`) are recognised as
+builds rather than versions.
+
+It reads straight from the ingested release articles, so it needs no extra job
+— anything `npm run ingest:once` picks up appears here.
+
+**On benchmarks:** the original plan paired this with a benchmark-claim
+tracker. Only 3 of ~1,000 articles named a benchmark and 2 carried a score, so
+it was dropped rather than built against no data. Benchmark numbers live in
+model cards, papers and leaderboards; adding those sources is the prerequisite
+if you want it later.
+
 ## Roadmap
 
 1. ✅ Foundation, ingestion, feed UI
@@ -290,4 +307,4 @@ coming" → shipped.
 3. ✅ OpenAI enrichment, embeddings, semantic dedup
 4. ✅ Story clustering with corroboration-boosted credibility
 5. ✅ Model Radar — leak → corroboration → launch lifecycle
-6. Release and benchmark tracker
+6. ✅ Release tracker (benchmarks dropped — see below)
