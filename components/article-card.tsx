@@ -85,11 +85,18 @@ export function ArticleCard({
           {article.orgSlugs.slice(0, 2).map((slug) => {
             const org = ORG_BY_SLUG.get(slug);
             if (!org) return null;
+            const active = filters.orgs.includes(slug);
             return (
               <a
                 key={slug}
                 href={buildQuery(filters, { org: slug })}
-                className="inline-flex items-center gap-1 text-[11px] text-ink-muted transition-colors hover:text-ink"
+                title={active ? `Remove ${org.name} filter` : `Filter to ${org.name}`}
+                className={cn(
+                  "inline-flex items-center gap-1 text-[11px] transition-colors",
+                  active
+                    ? "font-medium text-clay-deep"
+                    : "text-ink-muted hover:text-ink",
+                )}
               >
                 <span
                   className="h-1.5 w-1.5 rounded-full"
@@ -120,15 +127,26 @@ export function ArticleCard({
 
         {article.tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
-            {article.tags.slice(0, 3).map((tag) => (
-              <a
-                key={tag}
-                href={buildQuery(filters, { tag })}
-                className="rounded-sm bg-paper-sunken px-1.5 py-px font-mono text-[10px] text-ink-muted transition-colors hover:text-ink"
-              >
-                {tag}
-              </a>
-            ))}
+            {article.tags.slice(0, 3).map((tag) => {
+              const active = filters.tags.includes(tag);
+              return (
+                <a
+                  key={tag}
+                  href={buildQuery(filters, { tag })}
+                  // Active tags are marked so it's clear a second click
+                  // removes the filter rather than re-applying it.
+                  title={active ? `Remove "${tag}" filter` : `Filter to "${tag}"`}
+                  className={cn(
+                    "rounded-sm px-1.5 py-px font-mono text-[10px] transition-colors",
+                    active
+                      ? "bg-clay text-white"
+                      : "bg-paper-sunken text-ink-muted hover:text-ink",
+                  )}
+                >
+                  {tag}
+                </a>
+              );
+            })}
           </div>
         )}
 
@@ -159,8 +177,17 @@ export function ArticleCard({
           <div className="mt-1.5 flex items-baseline gap-2 text-[11px]">
             <a
               href={buildQuery(filters, { src: article.sourceSlug })}
-              className="min-w-0 truncate text-ink-muted transition-colors hover:text-ink"
-              title={`Filter to ${article.sourceName}`}
+              className={cn(
+                "min-w-0 truncate transition-colors",
+                filters.sources.includes(article.sourceSlug)
+                  ? "font-medium text-clay-deep"
+                  : "text-ink-muted hover:text-ink",
+              )}
+              title={
+                filters.sources.includes(article.sourceSlug)
+                  ? `Remove ${article.sourceName} filter`
+                  : `Filter to ${article.sourceName}`
+              }
             >
               {article.sourceName}
             </a>

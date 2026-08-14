@@ -225,8 +225,19 @@ title-similarity dedup and title-based clustering, exactly as it did before.
 ## Story clustering
 
 ```bash
-npm run cluster:once   # regroup the last 7 days
+npm run cluster:once           # regroup the last 7 days
+npm run rescore                # re-apply credibility rules to existing rows
+npm run embed:backfill force   # re-embed everything from current summaries
 ```
+
+Run `rescore` after changing the publisher tier table or a scoring rule —
+scores are written at ingest time, so existing rows keep the old verdict
+otherwise. It uses only stored data, so it is free and repeatable.
+
+Run `embed:backfill force` after a large enrichment pass: vectors built from
+raw feed text no longer match the summaries now stored. Re-embedding 974
+articles from LLM summaries took clustering from 64 stories / 186 articles to
+72 / 265, and correctly merged 22 articles from 21 outlets into one story.
 
 The same event covered by several outlets becomes one **story**. Clustered
 rows show a clay "N sources" link in the feed; `/story/[id]` lists every

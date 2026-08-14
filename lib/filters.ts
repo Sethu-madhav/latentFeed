@@ -24,6 +24,9 @@ export const SORT_MODES: SortMode[] = ["newest", "credibility", "impact"];
 
 export const PAGE_SIZE = 60;
 
+/** Where an unfiltered feed lives. Used when a query string would be empty. */
+export const FEED_PATH = "/";
+
 const VALID_CATEGORIES = new Set<string>(CATEGORY_ORDER);
 
 /** Query values arrive as string | string[] | undefined from Next.js. */
@@ -109,7 +112,7 @@ export function buildQuery(
     clear: true;
   }>,
 ): string {
-  if (change.clear) return "";
+  if (change.clear) return FEED_PATH;
 
   const params = new URLSearchParams();
 
@@ -149,5 +152,8 @@ export function buildQuery(
   if (page > 1) params.set("page", String(page));
 
   const qs = params.toString();
-  return qs ? `?${qs}` : "";
+  // Must be the path, not "": an empty href resolves to the *current* URL, so
+  // toggling off the last active filter would re-request the filtered page and
+  // look like the click did nothing.
+  return qs ? `?${qs}` : FEED_PATH;
 }

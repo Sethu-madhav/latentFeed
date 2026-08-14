@@ -33,6 +33,8 @@ npm run ingest:once      # one cycle now; append slugs to limit: npm run ingest:
 npm run enrich:once      # one LLM batch; `all` drains the backlog
 npm run embed:backfill   # embed rows with no vector; `all` drains
 npm run cluster:once     # regroup the last 7 days into stories
+npm run rescore          # re-run the credibility scorer over every article
+npm run embed:backfill force   # re-embed everything (after enrichment rewrites summaries)
 npm run test             # vitest
 npm run typecheck        # tsc --noEmit
 ```
@@ -83,6 +85,19 @@ that fires is stored in `credibility_reason` jsonb and surfaced in the meter's
 hover text. **Never add a scoring rule without recording its reason** — an
 opaque score is worse than none here.
 
+**Scores are computed at write time, so rule changes need `npm run rescore`.**
+It reproduces the LLM's contribution from the `llm-unconfirmed` /
+`llm-confirmed` rules already stored in `credibility_reason`, so re-scoring
+costs nothing and never re-runs the model. Expanding the publisher table moved
+119 scores this way.
+
+**`PUBLISHER_TIERS` must cover the long tail, not just the famous outlets.**
+Aggregator queries surface publishers a hand-picked list never anticipates;
+before expansion 46% of articles hit `publisher-unknown` and flat-defaulted to
+3/5. `tierForDomain` also treats any tracked company's own domain as 5 — those
+were falling through to the unknown default, so a lab's own announcement
+reached us via an aggregator scored 4 instead of 5.
+
 **Duplicates are kept, not dropped.** A story another outlet already filed goes
 into `article_duplicates` and re-runs the scorer. That is how a rumour earns
 its way toward confirmed.
@@ -120,6 +135,13 @@ and catch synonym rewrites ("buy" vs "acquire") that headline overlap cannot.
 **Filter state lives entirely in the URL** (`?q=&cat=&org=&tag=&src=&cred=&sort=&page=`).
 The rail is plain anchors built by `buildQuery` in `lib/filters.ts`, so it works
 without JS and every view is shareable. Don't move it to client state.
+
+Facets toggle: clicking an active tag, org, category or source removes it.
+**`buildQuery` must never return an empty string** — an empty `href` resolves
+to the *current* URL, so toggling off the last remaining filter silently
+re-requested the filtered page and looked like a dead click. It returns
+`FEED_PATH` instead. Active facets are styled on cards as well as in the rail,
+so it's visible that a second click will clear them.
 
 ## Gotchas that cost time
 

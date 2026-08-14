@@ -18,8 +18,13 @@ import { OpenAIFatalError } from "@/lib/llm/openai";
  * after switching OPENAI_EMBEDDING_MODEL the old rows are invisible to dedup
  * until they're re-embedded.
  *
- *   npm run embed:backfill        # one batch
- *   npm run embed:backfill all    # drain
+ *   npm run embed:backfill         # one batch
+ *   npm run embed:backfill all     # drain
+ *   npm run embed:backfill force   # re-embed everything, drained
+ *
+ * `force` exists because enrichment rewrites summaries after the fact: vectors
+ * built from the raw feed text no longer match the text now stored. Titles
+ * dominate similarity so this is a refinement, not a correctness fix.
  */
 const BATCH = 200;
 
@@ -33,7 +38,17 @@ async function main() {
   }
 
   const model = currentEmbeddingModel();
-  const drain = process.argv[2] === "all";
+  const arg = process.argv[2];
+  const force = arg === "force";
+  const drain = force || arg === "all";
+
+  // Forced runs clear the model stamp first, which makes every row match the
+  // "needs embedding" predicate and keeps the drain loop's progress check
+  // meaningful instead of re-selecting rows it just wrote.
+  if (force) {
+    await db.update(articles).set({ embeddingModel: null });
+    console.log("cleared embedding_model on all rows for a full re-embed");
+  }
 
   const needsEmbedding = or(
     isNull(articles.embedding),

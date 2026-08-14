@@ -1,5 +1,5 @@
 import type { CredibilityReason } from "@/db/schema";
-import { firstPartyOrg, hostOf } from "@/lib/orgs";
+import { FIRST_PARTY_DOMAINS, firstPartyOrg, hostOf } from "@/lib/orgs";
 import { hasRumourLanguage } from "./classify";
 
 /**
@@ -60,6 +60,71 @@ export const PUBLISHER_TIERS: Record<string, 1 | 2 | 3 | 4 | 5> = {
   "testingcatalog.com": 1,
   "windowsreport.com": 2,
   "wccftech.com": 2,
+
+  // --- the long tail actually seen in this corpus -------------------------
+  // Aggregator queries surface far more publishers than a hand-picked list
+  // anticipates. Everything below appeared in real ingested articles; without
+  // it they all defaulted to a flat 3.
+
+  // Business and tech desks with original reporting
+  "fortune.com": 4,
+  "barrons.com": 4,
+  "datacenterdynamics.com": 4,
+  "calcalistech.com": 4,
+  "usatoday.com": 3,
+  "foxbusiness.com": 3,
+  "moneycontrol.com": 3,
+  "indiatoday.in": 3,
+  "timesnownews.com": 3,
+  "36kr.com": 3,
+  "digitaltoday.co.kr": 3,
+  "cybernews.com": 3,
+  "mashable.com": 3,
+  "howtogeek.com": 3,
+  "motherjones.com": 3,
+  "pymnts.com": 3,
+
+  // Market commentary: real outlets, but they repackage others' reporting
+  // with a stock angle rather than adding sourcing of their own.
+  "finance.yahoo.com": 2,
+  "yahoo.com": 2,
+  "tech.yahoo.com": 2,
+  "stocktwits.com": 2,
+  "247wallst.com": 2,
+  "benzinga.com": 2,
+  "seekingalpha.com": 2,
+  "whalesbook.com": 2,
+  "biggo.com": 2,
+  "futunn.com": 2,
+
+  // Crypto press covering AI tangentially
+  "cryptobriefing.com": 2,
+  "cryptonews.com": 2,
+  "coingape.com": 2,
+  "decrypt.co": 2,
+  "kucoin.com": 1,
+
+  // Syndicated wire copy on local stations — accurate but not original,
+  // and they arrive in bulk through aggregator queries.
+  "9news.com": 3,
+  "wtoc.com": 3,
+  "wwltv.com": 3,
+  "ktsm.com": 3,
+  "wyomingnews.com": 3,
+  "louisianaradionetwork.com": 3,
+  "lailluminator.com": 3,
+  "wwno.org": 3,
+
+  // Low-signal: content farms and off-topic sites the broad queries drag in.
+  "mshale.com": 1,
+  "sheepesports.com": 1,
+  "memeburn.com": 1,
+  "tech-insider.org": 1,
+  "startuphub.ai": 2,
+  "techtimes.com": 2,
+  "eciks.org": 1,
+  "plataformamedia.com": 2,
+  "cxotoday.com": 2,
 };
 
 export interface CredibilityInput {
@@ -213,10 +278,23 @@ export function scoreCredibility(input: CredibilityInput): CredibilityResult {
   };
 }
 
-/** Look up a domain's tier, matching subdomains against the registered host. */
+/**
+ * Look up a domain's tier, matching subdomains against the registered host.
+ *
+ * Tracked companies' own domains rate 5 without needing to be listed twice:
+ * a lab announcing on its own site is as confirmed as news gets, and reaching
+ * us via an aggregator doesn't change that. Without this they fell through to
+ * the unknown-publisher default of 3.
+ */
 export function tierForDomain(domain: string): number | null {
   const host = domain.replace(/^www\./, "").toLowerCase();
+
   if (host in PUBLISHER_TIERS) return PUBLISHER_TIERS[host];
+
+  for (const known of FIRST_PARTY_DOMAINS.keys()) {
+    if (host === known || host.endsWith(`.${known}`)) return 5;
+  }
+
   for (const [known, tier] of Object.entries(PUBLISHER_TIERS)) {
     if (host.endsWith(`.${known}`)) return tier;
   }

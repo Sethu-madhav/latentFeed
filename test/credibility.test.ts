@@ -117,3 +117,31 @@ describe("scoreCredibility", () => {
     expect(r.reasons.every((x) => typeof x.rule === "string")).toBe(true);
   });
 });
+
+describe("publisher tier coverage", () => {
+  it("rates a tracked company's own domain as first-party", () => {
+    // These arrive via aggregators with a publisher domain set, and used to
+    // fall through to the unknown default of 3.
+    expect(tierForDomain("anthropic.com")).toBe(5);
+    expect(tierForDomain("openai.com")).toBe(5);
+    expect(tierForDomain("blogs.nvidia.com")).toBe(5);
+  });
+
+  it("separates original reporting from market repackaging", () => {
+    expect(tierForDomain("fortune.com")).toBeGreaterThan(
+      tierForDomain("finance.yahoo.com")!,
+    );
+    expect(tierForDomain("datacenterdynamics.com")).toBeGreaterThan(
+      tierForDomain("stocktwits.com")!,
+    );
+  });
+
+  it("rates the noise the broad queries drag in at the bottom", () => {
+    expect(tierForDomain("mshale.com")).toBe(1);
+    expect(tierForDomain("sheepesports.com")).toBe(1);
+  });
+
+  it("still returns null for a genuinely unseen domain", () => {
+    expect(tierForDomain("some-brand-new-outlet.example")).toBeNull();
+  });
+});
