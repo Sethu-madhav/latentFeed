@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db, sql as client } from "./client";
-import { orgs, retiredSources, sources } from "./schema";
+import { orgs, readerState, retiredSources, sources } from "./schema";
 import { ALL_ORGS } from "@/lib/orgs";
 import { SOURCE_REGISTRY } from "@/lib/sources/registry";
 
@@ -36,6 +36,11 @@ async function main() {
       });
   }
   console.log(`seeded ${ALL_ORGS.length} orgs`);
+
+  // The reader-state row must exist: `touchLastSeen` is an UPDATE, so without
+  // it dismissing the "new since last visit" count would silently do nothing
+  // on a fresh install.
+  await db.insert(readerState).values({ id: 1 }).onConflictDoNothing();
 
   // Feeds the user removed stay removed. The registry says what a fresh
   // install gets, not what this install must have.
