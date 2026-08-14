@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/**
+ * Palette follows Anthropic's own surfaces: warm paper rather than white,
+ * near-black ink rather than pure black, and the clay accent used sparingly
+ * so it still means something when it appears.
+ */
+@theme {
+  --color-paper: #faf9f5;
+  --color-paper-raised: #ffffff;
+  --color-paper-sunken: #f0eee6;
+  --color-ink: #191917;
+  --color-ink-muted: #6b6a65;
+  --color-ink-faint: #93918a;
+  --color-rule: #e5e2d9;
+  --color-rule-strong: #d6d2c4;
+  --color-clay: #d97757;
+  --color-clay-deep: #bd5d3a;
+  --color-clay-wash: #f7ede8;
+
+  --font-serif: "Times New Roman", "Tiempos Text", Georgia, serif;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono",
+    monospace;
+}
+
+/* Dark mode keeps the warmth — charcoal with a brown cast, not blue-grey. */
+@layer base {
+  .dark {
+    --color-paper: #1f1e1d;
+    --color-paper-raised: #262625;
+    --color-paper-sunken: #191918;
+    --color-ink: #f5f4ee;
+    --color-ink-muted: #a3a099;
+    --color-ink-faint: #7c7972;
+    --color-rule: #35332f;
+    --color-rule-strong: #45423c;
+    --color-clay: #e08b6b;
+    --color-clay-deep: #d97757;
+    --color-clay-wash: #2e2724;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  ::selection {
+    background-color: var(--color-clay);
+    color: #fff;
+  }
+
+  /* Keyboard focus stays visible; mouse clicks don't leave a ring behind. */
+  :focus-visible {
+    outline: 2px solid var(--color-clay);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-serif);
+    letter-spacing: -0.011em;
+  }
+
+  /* Thin scrollbars in the filter rail so it reads as part of the page. */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-rule-strong) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background-color: var(--color-rule-strong);
+    border-radius: 3px;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
