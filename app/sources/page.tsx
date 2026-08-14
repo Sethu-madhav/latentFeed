@@ -1,13 +1,17 @@
 import { AddSourceForm } from "@/components/sources/add-source-form";
 import { SourceRow } from "@/components/sources/source-row";
-import { getSourcesWithHealth } from "@/lib/data";
+import { RetiredSources } from "@/components/sources/retired-sources";
+import { getRetiredSources, getSourcesWithHealth } from "@/lib/data";
 import { CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/sources/labels";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
-  const sources = await getSourcesWithHealth();
+  const [sources, retired] = await Promise.all([
+    getSourcesWithHealth(),
+    getRetiredSources(),
+  ]);
 
   const enabled = sources.filter((s) => s.enabled).length;
   const failing = sources.filter((s) => s.consecutiveFailures > 0).length;
@@ -77,6 +81,8 @@ export default async function SourcesPage() {
             ))}
           </section>
         ))}
+
+        <RetiredSources sources={retired} />
       </div>
     </div>
   );

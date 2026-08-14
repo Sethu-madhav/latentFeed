@@ -30,6 +30,8 @@ npm run db:generate      # drizzle-kit generate after a schema change
 npm run db:migrate       # apply migrations
 npm run db:seed          # upsert orgs + source registry (idempotent)
 npm run ingest:once      # one cycle now; append slugs to limit: npm run ingest:once openai-news
+npm run enrich:once      # one LLM batch; `all` drains the backlog
+npm run embed:backfill   # embed rows with no vector; `all` drains
 npm run test             # vitest
 npm run typecheck        # tsc --noEmit
 ```
@@ -48,9 +50,29 @@ cp .env.example .env && npm run db:migrate && npm run db:seed && npm run ingest:
 enrich (category, orgs, tags, credibility, impact) → Postgres. The web app
 reads Postgres directly in server components via `lib/data.ts`.
 
-**No API key is needed to run anything.** All enrichment in Section 1 is
-deterministic: keyword rules, an org alias dictionary, and a domain tier table.
-Rows record `enriched_by='heuristic'` so Section 3's LLM pass can backfill them.
+**No API key is needed to run anything.** The heuristic layer — keyword rules,
+an org alias dictionary, a domain tier table — is deterministic and always
+runs. With `OPENAI_API_KEY` set, two optional layers switch on:
+
+- **Embeddings** (`text-embedding-3-small`, 1536 dims) during ingest, enabling
+  semantic dedup. Without them dedup falls back to title-token overlap.
+- **LLM enrichment** (`gpt-5-mini`) on its own `ENRICH_CRON`, upgrading rows
+  from `enriched_by='heuristic'` to `'llm'` with a better summary, category,
+  tags and a claim-status judgment.
+
+Both degrade to the Section 1 behaviour on any failure. A fatal auth or
+billing error stops the batch on the first article and latches for the process
+rather than repeating for every row — check `/healthz` for `halted`.
+
+**The LLM never overrides credibility opaquely.** It returns a claim status
+(`confirmed` / `reported` / `unconfirmed`) which the scorer applies as a
+recorded rule: `llm-unconfirmed` docks a point for hedging the keywords missed,
+`llm-confirmed` restores one when the keyword rule fired on a false positive.
+The tooltip still explains every point.
+
+**arXiv is excluded from the LLM pass** (`SKIP_KINDS` in `worker/enrich.ts`) —
+several hundred rows a day whose abstracts are already clean and correctly
+categorised by the `isPaper` hint. They still get embeddings.
 
 **Credibility (`lib/enrich/credibility.ts`) is the core of the app.** Base score
 comes from the source, or — for aggregator feeds — from the *real publisher
@@ -102,6 +124,13 @@ without JS and every view is shareable. Don't move it to client state.
   `sources.id` in a correlated subquery becomes `"id"` and Postgres resolves it
   against the *inner* table. `getSourcesWithHealth` fetches its aggregates
   separately and merges them in JS instead.
+- **Vectors from different embedding models are not comparable.** Every
+  similarity query must filter on `embedding_model`, or it will return
+  confident nonsense. After changing `OPENAI_EMBEDDING_MODEL`, old rows are
+  invisible to dedup until `npm run embed:backfill all` re-embeds them.
+- **The gpt-5 family rejects `temperature`**, so `structuredCompletion` doesn't
+  send it. Structured output uses `response_format: json_schema` with
+  `strict: true`.
 
 ## Source control (`/sources`)
 
@@ -119,6 +148,14 @@ Two independent off-switches, and conflating them is the easiest mistake here:
 so removing a source destroys everything it contributed; the confirm step shows
 the count and points at Stop instead. Adding the feed back does not recover
 items that have since fallen out of it.
+
+**Deleting a stock source writes a tombstone to `retired_sources`, and
+`db:seed` skips those slugs.** Without it the registry resurrects the feed on
+the next seed along with everything it ingests — `meta.managedBy='user'`
+protects *edits*, not *deletions*. Never "restore" a missing stock source by
+re-seeding without checking `retired_sources` first: its absence is probably
+deliberate. The `/sources` page lists removed feeds with a Restore control,
+which clears the tombstone and re-inserts from the registry.
 
 Adding a feed **probes it first** (`lib/sources/validate.ts`) and refuses
 anything that parses to zero items — a source that silently contributes nothing
@@ -143,7 +180,7 @@ and `/`.
 
 ## Roadmap
 
-Sections 1 (foundation, ingest, feed UI) and 2 (source control) are done.
-Next: **3** Claude enrichment + embeddings and semantic dedup · **4** story
-clustering · **5** Model Radar (leak → launch lifecycle) · **6** release and
-benchmark tracker.
+Sections 1 (foundation, ingest, feed UI), 2 (source control) and 3 (OpenAI
+enrichment, embeddings, semantic dedup) are done. Next: **4** story clustering
+· **5** Model Radar (leak → launch lifecycle) · **6** release and benchmark
+tracker.

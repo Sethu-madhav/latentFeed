@@ -16,6 +16,7 @@ import {
   articles,
   ingestRuns,
   orgs,
+  retiredSources,
   sources,
   type ArticleCategory,
   type CredibilityReason,
@@ -23,6 +24,7 @@ import {
   type SourceKind,
 } from "@/db/schema";
 import { PAGE_SIZE, type FeedFilters } from "@/lib/filters";
+import { SOURCE_REGISTRY } from "@/lib/sources/registry";
 
 export interface FeedArticle {
   id: string;
@@ -41,6 +43,8 @@ export interface FeedArticle {
   publisherDomain: string | null;
   sourceName: string;
   sourceSlug: string;
+  /** 'heuristic' or 'llm' — surfaced so the two are distinguishable. */
+  enrichedBy: string;
 }
 
 /** The weighted tsvector — must mirror articles_search_idx to use it. */
@@ -125,6 +129,7 @@ export async function getFeed(
         publisherDomain: articles.publisherDomain,
         sourceName: sources.name,
         sourceSlug: sources.slug,
+        enrichedBy: articles.enrichedBy,
       })
       .from(articles)
       .innerJoin(sources, eq(sources.id, articles.sourceId))
@@ -322,6 +327,31 @@ export async function getSourcesWithHealth(): Promise<SourceHealth[]> {
       itemsNew7d: itemsBySource.get(s.id) ?? 0,
     };
   });
+}
+
+export interface RetiredSource {
+  slug: string;
+  name: string | null;
+  retiredAt: Date;
+  /** Whether it can be restored from the stock registry. */
+  inRegistry: boolean;
+}
+
+/** Stock feeds the user removed, which seeding deliberately skips. */
+export async function getRetiredSources(): Promise<RetiredSource[]> {
+  const rows = await db
+    .select()
+    .from(retiredSources)
+    .orderBy(desc(retiredSources.retiredAt));
+
+  const known = new Set(SOURCE_REGISTRY.map((s) => s.slug));
+
+  return rows.map((r) => ({
+    slug: r.slug,
+    name: r.name,
+    retiredAt: r.retiredAt,
+    inRegistry: known.has(r.slug),
+  }));
 }
 
 export interface FeedStats {

@@ -164,11 +164,19 @@ export const articles = pgTable(
     /** Independent outlets seen carrying the same story. */
     corroborationCount: integer("corroboration_count").notNull().default(0),
 
-    /** Reserved for Section 3 semantic dedup; null until then. */
+    /**
+     * Semantic dedup vector. Null when embeddings are switched off or the
+     * call failed — dedup falls back to title similarity in that case.
+     */
     embedding: vector("embedding", { dimensions: 1536 }),
+    /**
+     * Which model produced `embedding`. Vectors from different models are not
+     * comparable, so every similarity query must filter on this.
+     */
     embeddingModel: text("embedding_model"),
-    /** 'heuristic' now, 'llm' once Section 3 backfills. */
+    /** 'heuristic' until the LLM pass rewrites the row as 'llm'. */
     enrichedBy: text("enriched_by").notNull().default("heuristic"),
+    enrichedAt: timestamp("enriched_at", { withTimezone: true }),
     lang: text("lang").notNull().default("en"),
   },
   (t) => [
@@ -179,6 +187,12 @@ export const articles = pgTable(
     uniqueIndex("articles_canonical_url_idx").on(t.canonicalUrl),
     index("articles_orgs_idx").using("gin", t.orgSlugs),
     index("articles_tags_idx").using("gin", t.tags),
+    index("articles_enriched_by_idx").on(t.enrichedBy),
+    // HNSW over cosine distance, which is what the dedup query orders by.
+    index("articles_embedding_idx").using(
+      "hnsw",
+      t.embedding.op("vector_cosine_ops"),
+    ),
     // Weighted full-text search: title outranks summary.
     // Tags are deliberately absent — array_to_string is only STABLE, so
     // Postgres rejects it in an index expression. Tag lookups go through
@@ -216,6 +230,22 @@ export const articleDuplicates = pgTable(
   },
   (t) => [index("article_duplicates_article_idx").on(t.articleId)],
 );
+
+// ---------------------------------------------------------------------------
+// retired_sources — stock feeds the user has deliberately removed.
+//
+// Without this, `db:seed` resurrects them: the registry is the source of truth
+// for what *exists*, so a deleted stock feed comes straight back on the next
+// seed, along with everything it ingests. Deleting is a decision and has to
+// outlive a re-seed.
+// ---------------------------------------------------------------------------
+export const retiredSources = pgTable("retired_sources", {
+  slug: text("slug").primaryKey(),
+  name: text("name"),
+  retiredAt: timestamp("retired_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 // ---------------------------------------------------------------------------
 // ingest_runs — per-source poll history, for health and debugging.

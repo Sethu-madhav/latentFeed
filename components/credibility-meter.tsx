@@ -23,10 +23,12 @@ export function credibilityLabel(score: number): string {
 export function CredibilityMeter({
   score,
   reasons,
+  enrichedBy,
   className,
 }: {
   score: number;
   reasons?: CredibilityReason[];
+  enrichedBy?: string;
   className?: string;
 }) {
   const tooltip = [
@@ -35,6 +37,9 @@ export function CredibilityMeter({
       const sign = r.delta > 0 ? `+${r.delta}` : r.delta < 0 ? `${r.delta}` : "·";
       return `${sign}  ${r.detail ?? r.rule}`;
     }),
+    // Say which pass produced this, so a heuristic guess isn't mistaken for a
+    // read of the actual article.
+    enrichedBy === "llm" ? "\nassessed by model" : "\nkeyword heuristics only",
   ].join("\n");
 
   return (

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   articleDuplicates,
@@ -10,6 +10,12 @@ import {
 import { enrich } from "@/lib/enrich";
 import { canonicalizeUrl, findDuplicate } from "@/lib/enrich/dedup";
 import { scoreCredibility } from "@/lib/enrich/credibility";
+import {
+  SEMANTIC_DUPLICATE_DISTANCE,
+  currentEmbeddingModel,
+  embedItems,
+  embeddingText,
+} from "@/lib/embeddings";
 import { fetchSource } from "@/lib/fetching";
 import type { FeedItem } from "@/lib/fetching/types";
 
@@ -57,11 +63,18 @@ export async function ingestSource(source: Source): Promise<SourceResult> {
     const cutoff = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000);
     const fresh = result.items.filter((i) => i.publishedAt >= cutoff);
 
+    // Embed the whole poll in one batched request rather than one call per
+    // article. Returns null vectors when embeddings are off or the call fails,
+    // in which case dedup falls back to title similarity.
+    const embedded = await embedItems(fresh, (item) =>
+      embeddingText(item.title, item.content),
+    );
+
     let inserted = 0;
     let duplicates = 0;
 
-    for (const item of fresh) {
-      const outcome = await storeItem(source, item);
+    for (const { item, embedding } of embedded) {
+      const outcome = await storeItem(source, item, embedding);
       if (outcome === "inserted") inserted++;
       else if (outcome === "duplicate") duplicates++;
     }
@@ -128,6 +141,85 @@ export async function ingestSource(source: Source): Promise<SourceResult> {
 
 type StoreOutcome = "inserted" | "duplicate" | "skipped";
 
+interface DuplicateMatch {
+  id: string;
+  sourceId: number;
+  similarity: number;
+}
+
+/**
+ * Nearest neighbour within the dedup window, by cosine distance.
+ *
+ * The `embedding_model` filter is not optional: vectors from different models
+ * occupy different spaces, so comparing across them produces confident
+ * nonsense. Rows embedded by an older model are simply invisible here.
+ */
+async function findSemanticDuplicate(
+  embedding: number[],
+  since: Date,
+): Promise<DuplicateMatch | null> {
+  const literal = toVectorLiteral(embedding);
+  const model = currentEmbeddingModel();
+
+  const [match] = await db
+    .select({
+      id: articles.id,
+      sourceId: articles.sourceId,
+      distance: sql<number>`${articles.embedding} <=> ${literal}::vector`,
+    })
+    .from(articles)
+    .where(
+      and(
+        gte(articles.publishedAt, since),
+        isNotNull(articles.embedding),
+        eq(articles.embeddingModel, model),
+      ),
+    )
+    .orderBy(sql`${articles.embedding} <=> ${literal}::vector`)
+    .limit(1);
+
+  if (!match || Number(match.distance) > SEMANTIC_DUPLICATE_DISTANCE) {
+    return null;
+  }
+
+  return {
+    id: match.id,
+    sourceId: match.sourceId,
+    similarity: 1 - Number(match.distance),
+  };
+}
+
+/** Pre-embedding fallback: token overlap against recent headlines. */
+async function findTitleDuplicate(
+  title: string,
+  since: Date,
+): Promise<DuplicateMatch | null> {
+  const recent = await db
+    .select({
+      id: articles.id,
+      title: articles.title,
+      sourceId: articles.sourceId,
+    })
+    .from(articles)
+    .where(gte(articles.publishedAt, since))
+    .orderBy(desc(articles.publishedAt))
+    .limit(600);
+
+  const hit = findDuplicate(title, recent);
+  return hit
+    ? {
+        id: hit.match.id,
+        sourceId: hit.match.sourceId,
+        similarity: hit.similarity,
+      }
+    : null;
+}
+
+/** pgvector accepts a bracketed list; JSON.stringify already produces one. */
+export function toVectorLiteral(embedding: number[]): string {
+  return `[${embedding.join(",")}]`;
+}
+
 /**
  * Enrich and persist one item.
  *
@@ -138,6 +230,7 @@ type StoreOutcome = "inserted" | "duplicate" | "skipped";
 async function storeItem(
   source: Source,
   item: FeedItem,
+  embedding: number[] | null,
 ): Promise<StoreOutcome> {
   const canonical = canonicalizeUrl(item.url);
 
@@ -149,34 +242,20 @@ async function storeItem(
   if (existing.length > 0) return "skipped";
 
   const since = new Date(Date.now() - DEDUP_WINDOW_HOURS * 3_600_000);
-  const recent = await db
-    .select({
-      id: articles.id,
-      title: articles.title,
-      sourceId: articles.sourceId,
-      credibility: articles.credibility,
-      corroborationCount: articles.corroborationCount,
-      url: articles.url,
-      publisherDomain: articles.publisherDomain,
-      summary: articles.summary,
-      author: articles.author,
-    })
-    .from(articles)
-    .where(gte(articles.publishedAt, since))
-    .orderBy(desc(articles.publishedAt))
-    .limit(600);
 
-  const duplicate = findDuplicate(item.title, recent);
+  const duplicate = embedding
+    ? await findSemanticDuplicate(embedding, since)
+    : await findTitleDuplicate(item.title, since);
 
   if (duplicate) {
     // Only a *different* outlet counts as corroboration; the same feed
     // rewording its own headline proves nothing.
-    if (duplicate.match.sourceId === source.id) return "skipped";
+    if (duplicate.sourceId === source.id) return "skipped";
 
     await db
       .insert(articleDuplicates)
       .values({
-        articleId: duplicate.match.id,
+        articleId: duplicate.id,
         sourceId: source.id,
         url: item.url,
         title: item.title,
@@ -185,7 +264,7 @@ async function storeItem(
       })
       .onConflictDoNothing();
 
-    await bumpCorroboration(duplicate.match.id);
+    await bumpCorroboration(duplicate.id);
     return "duplicate";
   }
 
@@ -215,6 +294,8 @@ async function storeItem(
       orgSlugs: enriched.orgSlugs,
       tags: enriched.tags,
       enrichedBy: "heuristic",
+      embedding,
+      embeddingModel: embedding ? currentEmbeddingModel() : null,
     })
     .onConflictDoNothing();
 

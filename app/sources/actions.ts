@@ -4,8 +4,9 @@ import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { sources, type SourceKind } from "@/db/schema";
+import { retiredSources, sources, type SourceKind } from "@/db/schema";
 import { ALL_ORGS } from "@/lib/orgs";
+import { SOURCE_REGISTRY } from "@/lib/sources/registry";
 import { probeFeed, slugify, uniqueSlug } from "@/lib/sources/validate";
 
 const SOURCE_KINDS = [
@@ -156,7 +157,7 @@ export async function updateSource(
  */
 export async function deleteSource(id: number): Promise<ActionResult> {
   const [row] = await db
-    .select({ name: sources.name })
+    .select({ name: sources.name, slug: sources.slug })
     .from(sources)
     .where(eq(sources.id, id))
     .limit(1);
@@ -165,8 +166,48 @@ export async function deleteSource(id: number): Promise<ActionResult> {
 
   await db.delete(sources).where(eq(sources.id, id));
 
+  // Remember the removal, or the next `db:seed` puts the feed straight back
+  // along with everything it ingests.
+  await db
+    .insert(retiredSources)
+    .values({ slug: row.slug, name: row.name })
+    .onConflictDoNothing();
+
   revalidateAll();
   return { ok: true, message: `Removed ${row.name}` };
+}
+
+/** Undo a removal so the next seed restores the feed. */
+export async function restoreSource(slug: string): Promise<ActionResult> {
+  await db.delete(retiredSources).where(eq(retiredSources.slug, slug));
+
+  const def = SOURCE_REGISTRY.find((s) => s.slug === slug);
+  if (!def) {
+    revalidateAll();
+    return {
+      ok: true,
+      message: "Removal forgotten — that feed isn't in the stock registry, so add it manually.",
+    };
+  }
+
+  await db
+    .insert(sources)
+    .values({
+      slug: def.slug,
+      name: def.name,
+      url: def.url,
+      feedUrl: def.feedUrl,
+      kind: def.kind,
+      category: def.category,
+      baseCredibility: def.baseCredibility,
+      orgSlug: def.orgSlug,
+      pollMinutes: def.pollMinutes ?? 30,
+      meta: def.meta,
+    })
+    .onConflictDoNothing();
+
+  revalidateAll();
+  return { ok: true, message: `Restored ${def.name} — it will fill on the next poll` };
 }
 
 // ---------------------------------------------------------------------------

@@ -130,6 +130,7 @@ export function ArticleRow({
           <CredibilityMeter
             score={article.credibility}
             reasons={article.credibilityReason}
+            enrichedBy={article.enrichedBy}
           />
           <span className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">
             {credibilityLabel(article.credibility)}

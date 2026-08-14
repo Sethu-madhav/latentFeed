@@ -27,7 +27,12 @@ npm run dev              # web on :3000, worker on :8788
 | `POLL_CRON` | `*/30 * * * *` | Worker schedule. |
 | `WORKER_PORT` | `8788` | Health endpoint (`/healthz`). |
 | `DISABLE_INGEST` | unset | Set to `1` to stop polling; the web app still serves. |
-| `ANTHROPIC_API_KEY` | unset | Reserved for Section 3. Unused today. |
+| `OPENAI_API_KEY` | unset | Turns on embeddings and LLM enrichment. Everything works without it. |
+| `OPENAI_ENRICHMENT_MODEL` | `gpt-5-mini` | Chat model for the enrichment pass. |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Must be 1536-dim to match the column. |
+| `ENRICH_CRON` | `*/10 * * * *` | Enrichment schedule. |
+| `ENRICH_BATCH_SIZE` | `40` | Articles per enrichment cycle — the cost dial. |
+| `DISABLE_LLM` / `DISABLE_EMBEDDINGS` | unset | Switch off either half. |
 
 ## How it works
 
@@ -110,7 +115,12 @@ polled) and what broke if anything did.
 | ⏻ Stop | Halts polling entirely. Re-enabling also clears the failure counter. |
 | ↺ Reset | Clears the failure count on a source that's been erroring. |
 | ✏️ Edit | Name, feed URL, base credibility, poll interval, company. |
-| 🗑 Remove | Deletes the source **and all its articles**. The confirm step shows how many. |
+| 🗑 Remove | Deletes the source **and all its articles**. The confirm step shows how many. The removal is remembered, so `db:seed` won't bring it back. |
+
+Removed stock feeds appear in a **Removed** section at the bottom of
+`/sources` with a Restore button. That list is why `db:seed` reports
+"skipped N you removed" — deleting a feed is a decision, and it outlives a
+re-seed.
 
 **Adding a feed** validates before saving: paste a URL, press *Test feed* to see
 what it parses to, then *Add source*. The type is auto-detected from the URL.
@@ -120,7 +130,11 @@ Anything you add or edit here is marked `meta.managedBy='user'`, so
 `npm run db:seed` will not overwrite it.
 
 For bulk changes, edit `lib/sources/registry.ts` then `npm run db:seed` — it
-upserts by slug and skips user-managed rows.
+upserts by slug, skips user-managed rows, and skips anything you've removed.
+
+**Too many articles from one source?** Removing it deletes its history too.
+To keep the history but quiet the feed, use Hide instead — or raise the poll
+interval so it contributes less.
 
 Check source health:
 
@@ -157,11 +171,45 @@ test in `test/classify.test.ts`.
 **Worker health**: `curl localhost:8788/healthz` reports the last cycle,
 whether one is running, and the active cron expression.
 
+## Enrichment and semantic dedup
+
+Optional, and off until `OPENAI_API_KEY` is set.
+
+```bash
+npm run embed:backfill all   # embed existing rows (needed once)
+npm run enrich:once all      # drain the LLM backlog
+curl localhost:8788/healthz  # enrich + embeddings status, including `halted`
+```
+
+**Embeddings** run inside ingestion, batched once per source poll. New items
+are compared against the last 72 hours by cosine distance; anything closer than
+0.12 is the same story, so it becomes a corroboration record instead of a
+second row. Without a key this falls back to title-token overlap.
+
+**LLM enrichment** runs on its own schedule so a slow model never delays the
+feed. It rewrites the summary, category and tags, and returns a claim status
+that the credibility scorer applies as a recorded rule — `llm-unconfirmed`
+docks a point for hedging the keyword list missed, `llm-confirmed` restores one
+when the keyword rule was a false positive. Hover the meter to see which fired;
+it also says whether the row was assessed by the model or by keywords alone.
+
+arXiv is excluded from the LLM pass (hundreds of rows a day, already clean) but
+still gets embeddings.
+
+**Cost control:** `ENRICH_BATCH_SIZE` caps articles per cycle, `ENRICH_CRON`
+sets how often, and `DISABLE_LLM=1` stops it entirely while leaving embeddings
+on. Rows are processed newest-first, so if the backlog outruns the budget the
+articles you're actually reading get upgraded first.
+
+**Changing the embedding model** makes existing vectors incomparable — they're
+filtered out of dedup by `embedding_model` rather than silently mismatched.
+Re-run `npm run embed:backfill all` after any change.
+
 ## Roadmap
 
 1. ✅ Foundation, ingestion, feed UI
 2. ✅ `/sources` CRUD, per-source health, custom feeds
-3. Claude enrichment, embeddings, semantic dedup
+3. ✅ OpenAI enrichment, embeddings, semantic dedup
 4. Story clustering with corroboration-boosted credibility
 5. Model Radar — leak → corroboration → launch lifecycle
 6. Release and benchmark tracker

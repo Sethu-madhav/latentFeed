@@ -2,13 +2,19 @@ import "@/lib/env";
 import { createServer } from "node:http";
 import cron from "node-cron";
 import { sql } from "@/db/client";
-import { env } from "@/lib/env";
+import { embeddingHalt } from "@/lib/embeddings";
+import { embeddingsEnabled, env, llmEnabled } from "@/lib/env";
+import { pendingCount, runEnrichCycle } from "./enrich";
 import { runCycle } from "./ingest";
 
 let running = false;
 let lastRunAt: Date | null = null;
 let lastSummary: { polled: number; inserted: number; failed: number } | null =
   null;
+
+let enriching = false;
+let lastEnrichAt: Date | null = null;
+let enrichHalted: string | null = null;
 
 /** Run a cycle, guarding against overlap when one run outlasts the interval. */
 async function tick(trigger: string): Promise<void> {
@@ -40,6 +46,39 @@ async function tick(trigger: string): Promise<void> {
   }
 }
 
+/**
+ * Upgrade a batch of heuristic rows.
+ *
+ * Runs on its own schedule rather than inside ingestion so a slow or failing
+ * model can never delay or break the feed itself.
+ */
+async function enrichTick(): Promise<void> {
+  if (enriching || !llmEnabled() || enrichHalted) return;
+  enriching = true;
+
+  try {
+    const summary = await runEnrichCycle();
+    lastEnrichAt = new Date();
+
+    if (summary.processed > 0 || summary.failed > 0) {
+      console.log(
+        `[enrich] ${summary.processed} enriched · ${summary.failed} failed · ${await pendingCount()} pending`,
+      );
+    }
+
+    // A billing or auth failure repeats for every row; stop trying until the
+    // worker is restarted rather than logging the same error every 10 minutes.
+    if (summary.stoppedEarly) {
+      enrichHalted = summary.stoppedEarly;
+      console.warn(`[enrich] halted: ${summary.stoppedEarly}`);
+    }
+  } catch (err) {
+    console.error("[enrich] cycle failed", err);
+  } finally {
+    enriching = false;
+  }
+}
+
 const health = createServer((req, res) => {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
@@ -51,6 +90,18 @@ const health = createServer((req, res) => {
         lastSummary,
         cron: env.pollCron,
         ingestDisabled: env.disableIngest,
+        enrich: {
+          enabled: llmEnabled(),
+          running: enriching,
+          lastRunAt: lastEnrichAt?.toISOString() ?? null,
+          halted: enrichHalted,
+          model: env.enrichmentModel,
+        },
+        embeddings: {
+          enabled: embeddingsEnabled(),
+          model: env.embeddingModel,
+          halted: embeddingHalt(),
+        },
       }),
     );
     return;
@@ -72,6 +123,18 @@ if (env.disableIngest) {
   console.log(`polling on "${env.pollCron}"`);
   // Prime the feed immediately rather than waiting out the first interval.
   void tick("startup");
+}
+
+if (llmEnabled()) {
+  if (!cron.validate(env.enrichCron)) {
+    throw new Error(`invalid ENRICH_CRON: ${env.enrichCron}`);
+  }
+  cron.schedule(env.enrichCron, () => void enrichTick());
+  console.log(
+    `enrichment on "${env.enrichCron}" with ${env.enrichmentModel}`,
+  );
+} else {
+  console.log("enrichment off (no OPENAI_API_KEY or DISABLE_LLM=1)");
 }
 
 async function shutdown(signal: string): Promise<void> {

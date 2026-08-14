@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db, sql as client } from "./client";
-import { orgs, sources } from "./schema";
+import { orgs, retiredSources, sources } from "./schema";
 import { ALL_ORGS } from "@/lib/orgs";
 import { SOURCE_REGISTRY } from "@/lib/sources/registry";
 
@@ -37,7 +37,22 @@ async function main() {
   }
   console.log(`seeded ${ALL_ORGS.length} orgs`);
 
+  // Feeds the user removed stay removed. The registry says what a fresh
+  // install gets, not what this install must have.
+  const retired = new Set(
+    (await db.select({ slug: retiredSources.slug }).from(retiredSources)).map(
+      (r) => r.slug,
+    ),
+  );
+
+  let skipped = 0;
+
   for (const def of SOURCE_REGISTRY) {
+    if (retired.has(def.slug)) {
+      skipped++;
+      continue;
+    }
+
     await db
       .insert(sources)
       .values({
@@ -71,7 +86,10 @@ async function main() {
         },
       });
   }
-  console.log(`seeded ${SOURCE_REGISTRY.length} sources`);
+  console.log(
+    `seeded ${SOURCE_REGISTRY.length - skipped} sources` +
+      (skipped > 0 ? ` · skipped ${skipped} you removed` : ""),
+  );
 
   await client.end();
 }

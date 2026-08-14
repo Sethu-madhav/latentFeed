@@ -75,6 +75,14 @@ export interface CredibilityInput {
   hasPublishDate: boolean;
   /** Independent outlets already seen carrying this story. */
   corroborationCount?: number;
+  /**
+   * The LLM pass's read of whether the central claim has actually happened.
+   * Absent for heuristic-only rows.
+   */
+  llm?: {
+    claimStatus: "confirmed" | "reported" | "unconfirmed";
+    statusReason: string;
+  };
 }
 
 export interface CredibilityResult {
@@ -144,6 +152,25 @@ export function scoreCredibility(input: CredibilityInput): CredibilityResult {
       delta: -1,
       detail: `unconfirmed phrasing (“${hedge}”)`,
     });
+  }
+
+  // --- model's read of the claim -----------------------------------------
+  // The LLM adjusts the score but never replaces it, and only ever through a
+  // recorded rule — so the tooltip still explains every point gained or lost.
+  if (input.llm) {
+    const detail = input.llm.statusReason || input.llm.claimStatus;
+
+    if (input.llm.claimStatus === "unconfirmed" && !hedge) {
+      // Catches hedging the keyword list misses: "engineers are said to be
+      // evaluating", "internal testing suggests".
+      score -= 1;
+      reasons.push({ rule: "llm-unconfirmed", delta: -1, detail });
+    } else if (input.llm.claimStatus === "confirmed" && hedge) {
+      // Rescues a keyword false positive — a paper about "model leakage", or a
+      // launch post that happens to use the word "rumour".
+      score += 1;
+      reasons.push({ rule: "llm-confirmed", delta: 1, detail });
+    }
   }
 
   // --- corroboration -----------------------------------------------------
