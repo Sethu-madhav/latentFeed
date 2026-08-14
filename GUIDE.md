@@ -258,11 +258,36 @@ which method grouped it.
 Clustering is a full recompute over the window, so it's safe to re-run or to
 miss a cycle.
 
+## Model Radar
+
+```bash
+npm run radar:once   # rebuild from the last 45 days
+```
+
+`/radar` places every model release named recently on the arc from rumour to
+shipped, in four columns:
+
+| Status | What it means |
+|---|---|
+| **Released** | Weights or an announcement from the lab itself |
+| **Confirmed** | Well-sourced reporting the lab has not formally shipped |
+| **Reported** | Several outlets, or one credible one, but no first-party word |
+| **Rumoured** | A single low-confidence sighting — leak, datamine, forum post |
+
+Only first-party evidence can reach **Released**, so no amount of coverage
+promotes a rumour to shipped. Grok 4.6 sits at Confirmed with 20 outlets
+because xAI publishes no feed that counts as first-party.
+
+Clicking a model shows its timeline oldest-first, which is where the feature
+earns its place — Grok 4.6 reads: leaked in Cursor and pulled within hours
+(unverified) → Musk confirms the release window (reported) → "Grok 4.6 is
+coming" → shipped.
+
 ## Roadmap
 
 1. ✅ Foundation, ingestion, feed UI
 2. ✅ `/sources` CRUD, per-source health, custom feeds
 3. ✅ OpenAI enrichment, embeddings, semantic dedup
 4. ✅ Story clustering with corroboration-boosted credibility
-5. Model Radar — leak → corroboration → launch lifecycle
+5. ✅ Model Radar — leak → corroboration → launch lifecycle
 6. Release and benchmark tracker

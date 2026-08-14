@@ -8,7 +8,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { CATEGORY_META } from "@/lib/enrich/classify";
 import { getStory } from "@/lib/data";
 import { ORG_BY_SLUG } from "@/lib/orgs";
-import { displayHost, relativeTime } from "@/lib/utils";
+import { displayHost, relativeTime, timeAgo } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +90,7 @@ export default async function StoryPage({
             {credibilityLabel(story.topCredibility)} at best
           </span>
           <span suppressHydrationWarning>
-            first seen {relativeTime(story.firstSeenAt)} ago
+            first seen {timeAgo(story.firstSeenAt)}
           </span>
           <span
             title={

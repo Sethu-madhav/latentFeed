@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
+import type { ModelStatus } from "@/lib/enrich/models";
 import {
   boolean,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   real,
   serial,
   smallint,
@@ -273,6 +275,60 @@ export const articleDuplicates = pgTable(
   },
   (t) => [index("article_duplicates_article_idx").on(t.articleId)],
 );
+
+// ---------------------------------------------------------------------------
+// models — the radar: one row per model release we've seen named anywhere.
+//
+// Tracks the leak-to-launch arc. `status` is derived from evidence, never
+// asserted: "released" requires first-party proof, so no volume of rumour can
+// promote a model to shipped.
+// ---------------------------------------------------------------------------
+export const models = pgTable(
+  "models",
+  {
+    /** Canonical key, e.g. "qwen-3.8", "gemini-3.7-flash". */
+    slug: text("slug").primaryKey(),
+    name: text("name").notNull(),
+    family: text("family").notNull(),
+    orgSlug: text("org_slug").references(() => orgs.slug, {
+      onDelete: "set null",
+    }),
+    status: text("status").$type<ModelStatus>().notNull().default("rumoured"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    /** When first-party evidence appeared, if it has. */
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    mentionCount: integer("mention_count").notNull().default(0),
+    /** Distinct outlets, counted by publisher rather than feed. */
+    sourceCount: integer("source_count").notNull().default(0),
+    topCredibility: smallint("top_credibility").notNull().default(1),
+    /** The article that best represents the model's current state. */
+    leadArticleId: uuid("lead_article_id"),
+  },
+  (t) => [
+    index("models_status_idx").on(t.status),
+    index("models_last_seen_idx").on(t.lastSeenAt.desc()),
+  ],
+);
+
+/** Which articles mention which model. */
+export const modelMentions = pgTable(
+  "model_mentions",
+  {
+    modelSlug: text("model_slug")
+      .notNull()
+      .references(() => models.slug, { onDelete: "cascade" }),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.modelSlug, t.articleId] }),
+    index("model_mentions_article_idx").on(t.articleId),
+  ],
+);
+
+export type ModelRow = typeof models.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // retired_sources — stock feeds the user has deliberately removed.

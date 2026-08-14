@@ -23,7 +23,7 @@ import {
 import type { SourceHealth } from "@/lib/data";
 import { ALL_ORGS } from "@/lib/orgs";
 import { KIND_LABELS } from "@/lib/sources/labels";
-import { cn, relativeTime } from "@/lib/utils";
+import { cn, relativeTime, timeAgo } from "@/lib/utils";
 
 function IconButton({
   onClick,
@@ -168,7 +168,7 @@ export function SourceRow({ source }: { source: SourceHealth }) {
                 title={source.lastPolledAt.toLocaleString()}
                 suppressHydrationWarning
               >
-                polled {relativeTime(source.lastPolledAt)} ago
+                polled {timeAgo(source.lastPolledAt)}
               </span>
             )}
           </div>

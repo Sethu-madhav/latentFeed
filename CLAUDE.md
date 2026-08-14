@@ -34,6 +34,7 @@ npm run enrich:once      # one LLM batch; `all` drains the backlog
 npm run embed:backfill   # embed rows with no vector; `all` drains
 npm run cluster:once     # regroup the last 7 days into stories
 npm run rescore          # re-run the credibility scorer over every article
+npm run radar:once       # rebuild the model radar (leak → launch)
 npm run embed:backfill force   # re-embed everything (after enrichment rewrites summaries)
 npm run test             # vitest
 npm run typecheck        # tsc --noEmit
@@ -59,7 +60,7 @@ runs. With `OPENAI_API_KEY` set, two optional layers switch on:
 
 - **Embeddings** (`text-embedding-3-small`, 1536 dims) during ingest, enabling
   semantic dedup. Without them dedup falls back to title-token overlap.
-- **LLM enrichment** (`gpt-5-mini`) on its own `ENRICH_CRON`, upgrading rows
+- **LLM enrichment** (`gpt-5.4-mini`) on its own `ENRICH_CRON`, upgrading rows
   from `enriched_by='heuristic'` to `'llm'` with a better summary, category,
   tags and a claim-status judgment.
 
@@ -142,6 +143,35 @@ to the *current* URL, so toggling off the last remaining filter silently
 re-requested the filtered page and looked like a dead click. It returns
 `FEED_PATH` instead. Active facets are styled on cards as well as in the rail,
 so it's visible that a second click will clear them.
+
+## Model Radar (`/radar`)
+
+`lib/enrich/models.ts` extracts model releases from titles; `worker/radar.ts`
+aggregates them into the `models` table each cluster tick. Both are a full
+recompute, for the same reason clustering is.
+
+**Status is evidence-based and asymmetric.** `released` requires first-party
+proof — weights on the lab's own Hugging Face account, or an article on the
+lab's own domain. No volume of coverage promotes a rumour to shipped, which is
+why Grok 4.6 sits at `confirmed` with 20 outlets: xAI publishes no feed we can
+treat as first-party.
+
+**Normalisation is the whole game.** One release appears as `Qwen3.8-27B`,
+`Qwen 3.8 27b`, `Qwen/Qwen3.8-27B` and `unsloth/Qwen3.8-27B-GGUF`. Size
+suffixes (27B, 2.4T) and dated builds (-0813) are dropped because they identify
+a *build*; named tiers (Flash, Pro, Opus) are kept because they identify a
+*model*. Both word orders normalise to one slug: "Claude Opus 4.8" and
+"Gemini 3.7 Flash" put the tier on opposite sides of the version.
+
+Three guards earn their keep, each added after a real false positive:
+
+- **Tool releases.** `claude-code v2.1.232` from the GitHub feed produced a
+  phantom "Claude Code V2.1" model with ten mentions. See `NOT_MODELS`.
+- **Parameter counts.** "Qwen 30b MoE" produced "Qwen 30". The version may not
+  be followed by `b`.
+- **Regex backtracking.** Rejecting `30b` made the engine retry with `3`,
+  producing "Qwen 3". The version must swallow all its digits — hence the
+  `(?!\d)` before the size guard. Removing it silently resurrects the bug.
 
 ## Gotchas that cost time
 
@@ -247,8 +277,8 @@ and `/`.
 
 Sections 1 (foundation, ingest, feed UI), 2 (source control), 3 (OpenAI
 enrichment, embeddings, semantic dedup) and 4 (story clustering) are done.
-Next: **5** Model Radar (leak → launch lifecycle) · **6** release and
-benchmark tracker.
+Section 5 (Model Radar) is done too. Next: **6** release and benchmark
+tracker.
 
 **Feed layout:** a responsive card grid (1 / 2 / 3 / 4 columns). Two things
 about it are load-bearing:

@@ -21,6 +21,20 @@ export function relativeTime(date: Date, now = new Date()): string {
   });
 }
 
+/**
+ * Relative time with a correct suffix.
+ *
+ * `relativeTime` switches to an absolute date past a week, and blindly
+ * appending "ago" to that produced "Aug 5 ago". Use this wherever the phrasing
+ * needs a suffix; use `relativeTime` for bare stamps.
+ */
+export function timeAgo(date: Date, now = new Date()): string {
+  const label = relativeTime(date, now);
+  if (label === "now") return "just now";
+  // The relative forms are compact and digit-led ("4m", "3h", "2d").
+  return /^\d/.test(label) ? `${label} ago` : `on ${label}`;
+}
+
 /** Trim a summary to a whole word near the limit. */
 export function truncate(text: string, limit: number): string {
   if (text.length <= limit) return text;

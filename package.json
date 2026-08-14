@@ -18,6 +18,7 @@
     "embed:backfill": "tsx worker/embed-cli.ts",
     "cluster:once": "tsx worker/cluster-cli.ts",
     "rescore": "tsx worker/rescore-cli.ts",
+    "radar:once": "tsx worker/radar-cli.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx db/migrate.ts",
     "db:seed": "tsx db/seed.ts",

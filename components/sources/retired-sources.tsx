@@ -4,7 +4,7 @@ import { Undo2 } from "lucide-react";
 import { useTransition } from "react";
 import { restoreSource } from "@/app/sources/actions";
 import type { RetiredSource } from "@/lib/data";
-import { relativeTime } from "@/lib/utils";
+import { relativeTime, timeAgo } from "@/lib/utils";
 
 /**
  * Feeds removed from the stock registry.
@@ -42,7 +42,7 @@ export function RetiredSources({ sources }: { sources: RetiredSource[] }) {
               className="ml-2 font-mono text-[10.5px] text-ink-faint"
               suppressHydrationWarning
             >
-              removed {relativeTime(source.retiredAt)} ago
+              removed {timeAgo(source.retiredAt)}
             </span>
           </div>
 

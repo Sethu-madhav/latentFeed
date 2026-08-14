@@ -16,6 +16,8 @@ import {
   articleDuplicates,
   articles,
   ingestRuns,
+  modelMentions,
+  models,
   orgs,
   retiredSources,
   sources,
@@ -26,6 +28,7 @@ import {
   type SourceKind,
 } from "@/db/schema";
 import { PAGE_SIZE, type FeedFilters } from "@/lib/filters";
+import type { ModelStatus } from "@/lib/enrich/models";
 import { SOURCE_REGISTRY } from "@/lib/sources/registry";
 
 export interface FeedArticle {
@@ -420,6 +423,101 @@ export async function getStory(id: string): Promise<StoryDetail | null> {
     articles: members,
     alsoCarriedBy: dupes,
   };
+}
+
+export interface RadarModel {
+  slug: string;
+  name: string;
+  family: string;
+  orgSlug: string | null;
+  status: ModelStatus;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  releasedAt: Date | null;
+  mentionCount: number;
+  sourceCount: number;
+  topCredibility: number;
+  /** The article that best represents where the model currently stands. */
+  lead: { id: string; title: string; url: string; publishedAt: Date } | null;
+}
+
+/** Every tracked model, most recently active first. */
+export async function getRadar(): Promise<RadarModel[]> {
+  const rows = await db
+    .select({
+      slug: models.slug,
+      name: models.name,
+      family: models.family,
+      orgSlug: models.orgSlug,
+      status: models.status,
+      firstSeenAt: models.firstSeenAt,
+      lastSeenAt: models.lastSeenAt,
+      releasedAt: models.releasedAt,
+      mentionCount: models.mentionCount,
+      sourceCount: models.sourceCount,
+      topCredibility: models.topCredibility,
+      leadId: articles.id,
+      leadTitle: articles.title,
+      leadUrl: articles.url,
+      leadPublishedAt: articles.publishedAt,
+    })
+    .from(models)
+    .leftJoin(articles, eq(articles.id, models.leadArticleId))
+    .orderBy(desc(models.lastSeenAt));
+
+  return rows.map((r) => ({
+    slug: r.slug,
+    name: r.name,
+    family: r.family,
+    orgSlug: r.orgSlug,
+    status: r.status,
+    firstSeenAt: r.firstSeenAt,
+    lastSeenAt: r.lastSeenAt,
+    releasedAt: r.releasedAt,
+    mentionCount: r.mentionCount,
+    sourceCount: r.sourceCount,
+    topCredibility: r.topCredibility,
+    lead: r.leadId
+      ? {
+          id: r.leadId,
+          title: r.leadTitle!,
+          url: r.leadUrl!,
+          publishedAt: r.leadPublishedAt!,
+        }
+      : null,
+  }));
+}
+
+/** Every article naming a model, oldest first — the lifecycle timeline. */
+export async function getModelTimeline(slug: string): Promise<FeedArticle[]> {
+  return db
+    .select({
+      id: articles.id,
+      url: articles.url,
+      title: articles.title,
+      summary: articles.summary,
+      publishedAt: articles.publishedAt,
+      category: articles.category,
+      credibility: articles.credibility,
+      credibilityReason: articles.credibilityReason,
+      isRumour: articles.isRumour,
+      impact: articles.impact,
+      orgSlugs: articles.orgSlugs,
+      tags: articles.tags,
+      corroborationCount: articles.corroborationCount,
+      publisherDomain: articles.publisherDomain,
+      sourceName: sources.name,
+      sourceSlug: sources.slug,
+      enrichedBy: articles.enrichedBy,
+      storyId: articles.storyId,
+      storySourceCount: stories.sourceCount,
+    })
+    .from(modelMentions)
+    .innerJoin(articles, eq(articles.id, modelMentions.articleId))
+    .innerJoin(sources, eq(sources.id, articles.sourceId))
+    .leftJoin(stories, eq(stories.id, articles.storyId))
+    .where(eq(modelMentions.modelSlug, slug))
+    .orderBy(articles.publishedAt);
 }
 
 export interface RetiredSource {

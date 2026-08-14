@@ -5,6 +5,7 @@ import { sql } from "@/db/client";
 import { embeddingHalt } from "@/lib/embeddings";
 import { embeddingsEnabled, env, llmEnabled } from "@/lib/env";
 import { runClusterCycle } from "./cluster";
+import { runRadarCycle } from "./radar";
 import { pendingCount, runEnrichCycle } from "./enrich";
 import { runCycle } from "./ingest";
 
@@ -157,6 +158,15 @@ async function clusterTick(): Promise<void> {
   try {
     const summary = await runClusterCycle();
     lastClusterAt = new Date();
+
+    // Radar reads clustered, scored articles, so it follows clustering in the
+    // same tick rather than racing it on a separate schedule.
+    const radar = await runRadarCycle();
+    if (radar.models > 0) {
+      console.log(
+        `[radar] ${radar.models} models · released ${radar.byStatus.released} · confirmed ${radar.byStatus.confirmed} · rumoured ${radar.byStatus.rumoured}`,
+      );
+    }
     if (summary.stories > 0) {
       console.log(
         `[cluster] ${summary.stories} stories · ${summary.articlesClustered} articles · ${summary.rescored} re-scored`,

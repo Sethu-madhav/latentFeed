@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import type { FeedStats } from "@/lib/data";
 import { buildQuery, SORT_MODES, type FeedFilters } from "@/lib/filters";
-import { cn, relativeTime } from "@/lib/utils";
+import { cn, relativeTime, timeAgo } from "@/lib/utils";
 import { SearchBox } from "./search-box";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -25,6 +25,13 @@ export function SiteHeader({
           <span className="font-display text-[17px] tracking-tight text-ink">
             latent<span className="text-clay">Feed</span>
           </span>
+        </a>
+
+        <a
+          href="/radar"
+          className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block"
+        >
+          Radar
         </a>
 
         <a
@@ -70,7 +77,7 @@ export function SiteHeader({
         )}
         {stats.lastIngestAt && (
           <span className="ml-auto shrink-0" title={stats.lastIngestAt.toLocaleString()}>
-            updated {relativeTime(stats.lastIngestAt)} ago
+            updated {timeAgo(stats.lastIngestAt)}
           </span>
         )}
       </div>
