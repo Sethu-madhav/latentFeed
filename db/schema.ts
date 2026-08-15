@@ -332,31 +332,137 @@ export const modelMentions = pgTable(
 export type ModelRow = typeof models.$inferSelect;
 
 // ---------------------------------------------------------------------------
-// Reader state.
+// Accounts.
 //
-// Single-reader by design: the whole app sits behind one password, so there is
-// no user column to thread through every query and state syncs across devices
-// for free. If this ever becomes multi-reader, these three tables are where a
-// user id goes.
+// `users`, `accounts`, `sessions` and `verification_tokens` are the shape
+// @auth/drizzle-adapter expects; the column names are its contract, not ours.
+//
+// Sessions are JWTs rather than rows, because Auth.js only supports the
+// credentials provider under the JWT strategy — email/password sign-in and a
+// database session strategy are mutually exclusive. The `sessions` table is
+// still declared because the adapter's types require it.
 // ---------------------------------------------------------------------------
-export const articleReads = pgTable("article_reads", {
-  articleId: uuid("article_id")
-    .primaryKey()
-    .references(() => articles.id, { onDelete: "cascade" }),
-  readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+
+/** `admin` may manage sources; `reader` may only read and keep own state. */
+export type UserRole = "admin" | "reader";
+
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name"),
+  /**
+   * Lowercased before every read and write. Postgres compares text
+   * case-sensitively, so without that `Sethu@…` and `sethu@…` are two accounts
+   * and whichever signs up second gets a confusing unique violation.
+   */
+  email: text("email").notNull().unique(),
+  emailVerified: timestamp("email_verified", { withTimezone: true }),
+  image: text("image"),
+  /**
+   * Null for Google-only accounts — they never set one. Anything reading this
+   * must treat null as "no password sign-in", never as "empty password".
+   */
+  passwordHash: text("password_hash"),
+  role: text("role").$type<UserRole>().notNull().default("reader"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
-export const savedArticles = pgTable("saved_articles", {
-  articleId: uuid("article_id")
-    .primaryKey()
-    .references(() => articles.id, { onDelete: "cascade" }),
-  savedAt: timestamp("saved_at", { withTimezone: true }).notNull().defaultNow(),
-  note: text("note"),
+export type User = typeof users.$inferSelect;
+
+export const accounts = pgTable(
+  "accounts",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    provider: text("provider").notNull(),
+    providerAccountId: text("provider_account_id").notNull(),
+    refresh_token: text("refresh_token"),
+    access_token: text("access_token"),
+    expires_at: integer("expires_at"),
+    token_type: text("token_type"),
+    scope: text("scope"),
+    id_token: text("id_token"),
+    session_state: text("session_state"),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.providerAccountId] })],
+);
+
+export const sessions = pgTable("sessions", {
+  sessionToken: text("session_token").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expires: timestamp("expires", { withTimezone: true }).notNull(),
 });
 
-/** One row, id = 1. Holds the watermark for "new since your last visit". */
+export const verificationTokens = pgTable(
+  "verification_tokens",
+  {
+    identifier: text("identifier").notNull(),
+    token: text("token").notNull(),
+    expires: timestamp("expires", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.identifier, t.token] })],
+);
+
+// ---------------------------------------------------------------------------
+// Reader state, one set per user.
+//
+// Every row here is keyed by `(user_id, article_id)` and cascades from both
+// sides: deleting an article cleans up the marks that referenced it, and
+// deleting a user takes their whole reading history with them.
+//
+// These were single-row tables while the app sat behind one shared password.
+// Anything that reads them must now scope to the signed-in user — an unscoped
+// query silently returns *everyone's* marks, which reads as data corruption
+// rather than as a missing filter.
+// ---------------------------------------------------------------------------
+export const articleReads = pgTable(
+  "article_reads",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.articleId] }),
+    // The feed left-joins on (user, article) for every row it renders.
+    index("article_reads_user_idx").on(t.userId),
+  ],
+);
+
+export const savedArticles = pgTable(
+  "saved_articles",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    savedAt: timestamp("saved_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    note: text("note"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.articleId] }),
+    index("saved_articles_user_idx").on(t.userId),
+  ],
+);
+
+/** One row per user: the watermark for "new since your last visit". */
 export const readerState = pgTable("reader_state", {
-  id: integer("id").primaryKey().default(1),
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

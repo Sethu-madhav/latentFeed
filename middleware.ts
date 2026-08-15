@@ -1,30 +1,41 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, authDisabled, isValidSession } from "@/lib/auth";
+import NextAuth from "next-auth";
+import { NextResponse } from "next/server";
+import { PUBLIC_ROUTES, authConfig } from "@/lib/auth/config";
 
 /**
- * Gate everything behind the shared password once one is configured.
+ * Gate everything behind a session.
  *
- * With `APP_PASSWORD` unset the app is wide open, which is what you want
- * locally — the check only engages when deployed.
+ * This builds its own NextAuth instance from the *edge-safe* config rather
+ * than importing `@/lib/auth` — that module pulls in postgres.js and bcrypt,
+ * neither of which can be bundled for the edge runtime. All this needs is to
+ * read and verify the JWT cookie, which the config half can do alone.
  */
-export async function middleware(request: NextRequest) {
-  if (authDisabled()) return NextResponse.next();
+const { auth } = NextAuth(authConfig);
 
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (await isValidSession(token)) return NextResponse.next();
+export default auth((request) => {
+  const { pathname, search } = request.nextUrl;
+
+  if (PUBLIC_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`))) {
+    // Already signed in and heading for the login page: send them to the feed.
+    if (request.auth) return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.next();
+  }
+
+  if (request.auth) return NextResponse.next();
 
   const login = new URL("/login", request.url);
   // Come back to where they were headed after signing in.
-  login.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
+  login.searchParams.set("next", pathname + search);
   return NextResponse.redirect(login);
-}
+});
 
 export const config = {
   matcher: [
     /*
-     * Everything except the login route itself, Next's own assets and the
-     * favicon — gating those would break the login page it redirects to.
+     * Everything except Next's own assets, the favicon, and the auth
+     * endpoints — gating /api/auth would break the very callback that
+     * establishes the session, leaving Google sign-in in a redirect loop.
      */
-    "/((?!login|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/auth|_next/static|_next/image|favicon.ico).*)",
   ],
 };

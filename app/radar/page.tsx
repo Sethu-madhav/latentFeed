@@ -5,6 +5,7 @@ import { getRadar, type RadarModel } from "@/lib/data";
 import { STATUS_META, STATUS_ORDER, type ModelStatus } from "@/lib/enrich/models";
 import { ORG_BY_SLUG } from "@/lib/orgs";
 import { cn, relativeTime } from "@/lib/utils";
+import { SourcesLink } from "@/components/sources-link";
 
 export const dynamic = "force-dynamic";
 
@@ -40,12 +41,7 @@ export default async function RadarPage() {
             >
               Releases
             </a>
-            <a
-              href="/sources"
-              className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
-            >
-              Sources
-            </a>
+            <SourcesLink className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink" />
           </nav>
           <div className="flex-1" />
           <ThemeToggle />

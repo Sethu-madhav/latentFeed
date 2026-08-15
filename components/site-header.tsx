@@ -2,8 +2,10 @@ import { Suspense } from "react";
 import type { FeedStats } from "@/lib/data";
 import { buildQuery, SORT_MODES, type FeedFilters } from "@/lib/filters";
 import { cn, relativeTime, timeAgo } from "@/lib/utils";
+import { AccountMenu } from "./account-menu";
 import { ReaderControls } from "./reader-controls";
 import { SearchBox } from "./search-box";
+import { SourcesLink } from "./sources-link";
 import { ThemeToggle } from "./theme-toggle";
 
 const SORT_LABELS: Record<string, string> = {
@@ -58,12 +60,9 @@ export function SiteHeader({
           Releases
         </a>
 
-        <a
-          href="/sources"
-          className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block"
-        >
-          Sources
-        </a>
+        <Suspense fallback={null}>
+          <SourcesLink className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block" />
+        </Suspense>
 
         <Suspense fallback={<div className="flex-1" />}>
           <SearchBox initial={filters.q} />
@@ -87,6 +86,10 @@ export function SiteHeader({
         </div>
 
         <ThemeToggle />
+
+        <Suspense fallback={null}>
+          <AccountMenu />
+        </Suspense>
       </div>
 
       <div className="flex items-center gap-4 overflow-x-auto border-t border-rule/60 px-4 py-1.5 font-mono text-[10.5px] text-ink-faint sm:px-6">

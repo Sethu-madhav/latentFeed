@@ -4,10 +4,23 @@ import { RetiredSources } from "@/components/sources/retired-sources";
 import { getRetiredSources, getSourcesWithHealth } from "@/lib/data";
 import { CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/sources/labels";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { isAdminNow } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
+  /*
+   * Admin-only, checked against the database rather than the session token so
+   * that revoking someone takes effect on their next request instead of when
+   * their 90-day JWT expires.
+   *
+   * Redirecting rather than rendering a refusal keeps the page's existence
+   * quiet, and the server actions repeat this check independently — this
+   * guards the view, not the writes.
+   */
+  if (!(await isAdminNow())) redirect("/");
+
   const [sources, retired] = await Promise.all([
     getSourcesWithHealth(),
     getRetiredSources(),

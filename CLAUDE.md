@@ -212,10 +212,18 @@ sources *first* and confirm the data exists.
 
 ## Reader state and the brief
 
-**Single reader by design.** The app sits behind one shared password
-(`APP_PASSWORD` + `middleware.ts`), so `article_reads`, `saved_articles` and
-`reader_state` carry no user column and state syncs across devices for free.
-That is where a user id goes if it ever becomes multi-reader.
+**Multi-reader.** `article_reads`, `saved_articles` and `reader_state` are all
+keyed by `user_id` and cascade from `users`. Every query touching them resolves
+the reader itself through `requireUserId()` in `lib/data.ts`, rather than
+taking a user id from its caller — a caller that forgets to pass one would
+silently read across all readers, and that failure looks like corrupt data
+rather than a missing argument.
+
+**The user filter belongs in the JOIN, not the WHERE.** `readsFor` /
+`savedFor` in `lib/data.ts` exist for this. A left join whose `user_id = …`
+test sits in the WHERE clause drops every article the reader has *not* marked,
+turning the feed into "only things I've already read" — which reads as an
+empty database, not as a bug.
 
 **Marking read must never block the click.** `ReadLink` fires the action
 without awaiting it — the browser is already opening the publisher. Losing a
@@ -228,6 +236,52 @@ so a brief can never link an article that wasn't in scope.
 
 **With no key the digest still writes**, falling back to the top items by
 impact — same degradation contract as enrichment and embeddings.
+
+## Auth and roles
+
+Auth.js v5 (`lib/auth/`), sessions as JWTs, two ways in: Google, and
+email/password. Sign-up is open.
+
+**The config is split because middleware runs on the edge.** `lib/auth/config.ts`
+holds only what the edge can load; `lib/auth/index.ts` adds the Drizzle adapter
+and the credentials provider, both of which pull in postgres.js and bcrypt.
+`middleware.ts` builds its own `NextAuth(authConfig)` from the edge half. Import
+`@/lib/auth` there and the build fails naming a transitive dependency rather
+than the real cause.
+
+**Sessions are JWTs because credentials and database sessions are mutually
+exclusive in Auth.js.** The `sessions` table exists only to satisfy the
+adapter's types.
+
+**Roles are checked two different ways, on purpose.** `isAdmin()` reads the
+session token — cheap, used for rendering. `isAdminNow()` reads the database —
+used by `/sources` and by every mutation in `app/sources/actions.ts`. The token
+is stamped at sign-in and lives 90 days, so a revoked admin would otherwise
+keep source management, *including the cascading delete*, until it expired.
+Anything gating a capability must use `isAdminNow()`.
+
+**The first account is only auto-promoted when `ADMIN_EMAILS` is empty.**
+Sign-up is open, so if the list names an owner who hasn't signed in yet,
+promoting the first arrival would hand source management to whichever stranger
+found the URL first. The bootstrap exists so a fresh deploy with no config is
+never left with nobody able to manage sources.
+
+**`/sources` is admin-only and redirects everyone else**; the nav link is
+rendered by `SourcesLink`, which returns null for readers. The server actions
+repeat the check independently — a server action is a public HTTP endpoint, so
+hiding a button is presentation, not protection.
+
+**Google uses `allowDangerousEmailAccountLinking`.** The guard it disables
+protects against providers that don't verify email addresses; Google does. Left
+on, signing up with a password and later clicking the Google button dead-ends
+at `OAuthAccountNotLinked`. The reverse — signing *up* by password onto an
+address that already exists as a Google account — is refused, since setting a
+password there would hand the account to anyone who knows the address.
+
+**Google is optional.** With `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` unset the
+provider is dropped and the button is hidden, so email/password still works —
+same degradation contract as enrichment and embeddings. `AUTH_SECRET` is the
+one hard requirement.
 
 ## Deployment shape
 

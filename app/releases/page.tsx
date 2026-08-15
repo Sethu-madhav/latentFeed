@@ -4,6 +4,7 @@ import { getReleases, type ReleaseProject } from "@/lib/data";
 import { ORG_BY_SLUG } from "@/lib/orgs";
 import { cadenceLabel } from "@/lib/releases";
 import { cn, timeAgo, truncate } from "@/lib/utils";
+import { SourcesLink } from "@/components/sources-link";
 
 export const dynamic = "force-dynamic";
 
@@ -33,12 +34,7 @@ export default async function ReleasesPage() {
             <span className="rounded-md bg-paper-sunken px-2 py-1 font-medium text-ink">
               Releases
             </span>
-            <a
-              href="/sources"
-              className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
-            >
-              Sources
-            </a>
+            <SourcesLink className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink" />
           </nav>
           <div className="flex-1" />
           <ThemeToggle />

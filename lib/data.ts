@@ -31,6 +31,7 @@ import {
   type SourceCategory,
   type SourceKind,
 } from "@/db/schema";
+import { requireUserId } from "@/lib/auth";
 import { PAGE_SIZE, type FeedFilters } from "@/lib/filters";
 import type { ModelStatus } from "@/lib/enrich/models";
 import {
@@ -110,6 +111,28 @@ function buildWhere(f: FeedFilters): SQL[] {
   return clauses;
 }
 
+/**
+ * Join conditions for the signed-in reader's own marks.
+ *
+ * The user test belongs in the JOIN, never in WHERE. A left join whose
+ * `user_id = …` sits in the WHERE clause discards every row without a
+ * matching mark, quietly turning the feed into "only articles I have already
+ * read" — a filter that looks like an empty database rather than a bug.
+ */
+function readsFor(userId: string): SQL {
+  return and(
+    eq(articleReads.articleId, articles.id),
+    eq(articleReads.userId, userId),
+  )!;
+}
+
+function savedFor(userId: string): SQL {
+  return and(
+    eq(savedArticles.articleId, articles.id),
+    eq(savedArticles.userId, userId),
+  )!;
+}
+
 function orderFor(f: FeedFilters): SQL[] {
   // A text search orders by relevance first; without a query that rank is 0
   // for every row and the sort would be arbitrary.
@@ -133,6 +156,7 @@ export async function getFeed(
   f: FeedFilters,
 ): Promise<{ items: FeedArticle[]; total: number }> {
   const where = and(...buildWhere(f));
+  const userId = await requireUserId();
 
   const [rows, [{ value: total }]] = await Promise.all([
     db
@@ -162,8 +186,8 @@ export async function getFeed(
       .from(articles)
       .innerJoin(sources, eq(sources.id, articles.sourceId))
       .leftJoin(stories, eq(stories.id, articles.storyId))
-      .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
-      .leftJoin(savedArticles, eq(savedArticles.articleId, articles.id))
+      .leftJoin(articleReads, readsFor(userId))
+      .leftJoin(savedArticles, savedFor(userId))
       .where(where)
       .orderBy(...orderFor(f))
       .limit(PAGE_SIZE)
@@ -172,7 +196,7 @@ export async function getFeed(
       .select({ value: count() })
       .from(articles)
       .innerJoin(sources, eq(sources.id, articles.sourceId))
-      .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+      .leftJoin(articleReads, readsFor(userId))
       .where(where),
   ]);
 
@@ -384,6 +408,7 @@ export async function getStory(id: string): Promise<StoryDetail | null> {
   const [story] = await db.select().from(stories).where(eq(stories.id, id)).limit(1);
   if (!story) return null;
 
+  const userId = await requireUserId();
   const members = await db
     .select({
       id: articles.id,
@@ -410,8 +435,8 @@ export async function getStory(id: string): Promise<StoryDetail | null> {
     })
     .from(articles)
     .innerJoin(sources, eq(sources.id, articles.sourceId))
-    .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
-    .leftJoin(savedArticles, eq(savedArticles.articleId, articles.id))
+    .leftJoin(articleReads, readsFor(userId))
+    .leftJoin(savedArticles, savedFor(userId))
     .where(eq(articles.storyId, id))
     .orderBy(articles.publishedAt);
 
@@ -514,6 +539,7 @@ export async function getRadar(): Promise<RadarModel[]> {
 
 /** Every article naming a model, oldest first — the lifecycle timeline. */
 export async function getModelTimeline(slug: string): Promise<FeedArticle[]> {
+  const userId = await requireUserId();
   return db
     .select({
       id: articles.id,
@@ -542,8 +568,8 @@ export async function getModelTimeline(slug: string): Promise<FeedArticle[]> {
     .innerJoin(articles, eq(articles.id, modelMentions.articleId))
     .innerJoin(sources, eq(sources.id, articles.sourceId))
     .leftJoin(stories, eq(stories.id, articles.storyId))
-    .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
-    .leftJoin(savedArticles, eq(savedArticles.articleId, articles.id))
+    .leftJoin(articleReads, readsFor(userId))
+    .leftJoin(savedArticles, savedFor(userId))
     .where(eq(modelMentions.modelSlug, slug))
     .orderBy(articles.publishedAt);
 }
@@ -644,6 +670,7 @@ export async function getReleases(): Promise<ReleaseProject[]> {
 
 /** Starred items, most recently saved first. */
 export async function getSaved(): Promise<FeedArticle[]> {
+  const userId = await requireUserId();
   return db
     .select({
       id: articles.id,
@@ -672,7 +699,10 @@ export async function getSaved(): Promise<FeedArticle[]> {
     .innerJoin(articles, eq(articles.id, savedArticles.articleId))
     .innerJoin(sources, eq(sources.id, articles.sourceId))
     .leftJoin(stories, eq(stories.id, articles.storyId))
-    .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+    .leftJoin(articleReads, readsFor(userId))
+    // This one drives off savedArticles, so the scope is a WHERE rather than a
+    // join condition — without it the page lists every reader's stars.
+    .where(eq(savedArticles.userId, userId))
     .orderBy(desc(savedArticles.savedAt));
 }
 
@@ -690,12 +720,18 @@ export interface ReaderCounts {
  * away" even for items you never opened.
  */
 export async function getReaderCounts(): Promise<ReaderCounts> {
+  const userId = await requireUserId();
+
   const [state] = await db
     .select({ lastSeenAt: readerState.lastSeenAt })
     .from(readerState)
-    .where(eq(readerState.id, 1))
+    .where(eq(readerState.userId, userId))
     .limit(1);
 
+  /*
+   * A reader with no watermark yet has never visited, so everything is new.
+   * The row is created on the first `touchLastSeen`, not at sign-up.
+   */
   const since = state?.lastSeenAt ?? new Date(0);
 
   const [[fresh], [unread], [saved]] = await Promise.all([
@@ -708,9 +744,12 @@ export async function getReaderCounts(): Promise<ReaderCounts> {
       .select({ value: sql<number>`count(*)::int` })
       .from(articles)
       .innerJoin(sources, eq(sources.id, articles.sourceId))
-      .leftJoin(articleReads, eq(articleReads.articleId, articles.id))
+      .leftJoin(articleReads, readsFor(userId))
       .where(and(isNull(sources.mutedAt), isNull(articleReads.articleId))),
-    db.select({ value: sql<number>`count(*)::int` }).from(savedArticles),
+    db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(savedArticles)
+      .where(eq(savedArticles.userId, userId)),
   ]);
 
   return {

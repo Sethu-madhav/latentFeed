@@ -43,6 +43,13 @@
       "when": 1786744278438,
       "tag": "0005_high_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786757195401,
+      "tag": "0006_salty_the_initiative",
+      "breakpoints": true
     }
   ]
 }

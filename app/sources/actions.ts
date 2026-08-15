@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db/client";
 import { retiredSources, sources, type SourceKind } from "@/db/schema";
+import { isAdminNow } from "@/lib/auth";
 import { ALL_ORGS } from "@/lib/orgs";
 import { SOURCE_REGISTRY } from "@/lib/sources/registry";
 import { probeFeed, slugify, uniqueSlug } from "@/lib/sources/validate";
@@ -38,6 +39,29 @@ export interface ActionResult {
   message?: string;
 }
 
+/**
+ * Every action in this file is admin-only.
+ *
+ * Sign-up is open, so being authenticated grants nothing here. These are not
+ * merely settings: `articles.source_id` is `on delete cascade`, so
+ * `deleteSource` destroys a feed's entire article history, and that history is
+ * shared — it feeds corroboration counts and therefore every reader's
+ * credibility scores. `testFeed` is included because it makes the server fetch
+ * an arbitrary URL chosen by the caller.
+ *
+ * A server action is a public HTTP endpoint. Hiding the buttons in the UI is
+ * presentation, not protection; the check has to live here, where the write
+ * actually happens.
+ *
+ * Uses the database-backed check rather than the session's role, so that
+ * revoking an admin takes effect immediately instead of when their 90-day
+ * token happens to expire.
+ */
+async function denyNonAdmin(): Promise<ActionResult | null> {
+  if (await isAdminNow()) return null;
+  return { ok: false, message: "Only an admin can manage sources." };
+}
+
 /** Both views depend on the source list, so both are invalidated together. */
 function revalidateAll(): void {
   revalidatePath("/sources");
@@ -63,6 +87,8 @@ export async function setSourceEnabled(
   id: number,
   enabled: boolean,
 ): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   await db
     .update(sources)
     .set(
@@ -87,6 +113,8 @@ export async function setSourceMuted(
   id: number,
   muted: boolean,
 ): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   await db
     .update(sources)
     .set({ mutedAt: muted ? new Date() : null })
@@ -98,6 +126,8 @@ export async function setSourceMuted(
 
 /** Clear the failure counter without changing anything else. */
 export async function resetSourceFailures(id: number): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   await db
     .update(sources)
     .set({ consecutiveFailures: 0, disabledReason: null, enabled: true })
@@ -129,6 +159,8 @@ export async function updateSource(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   const parsed = updateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -156,6 +188,8 @@ export async function updateSource(
  * without a re-ingest, and older items may be past their feed's window.
  */
 export async function deleteSource(id: number): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   const [row] = await db
     .select({ name: sources.name, slug: sources.slug })
     .from(sources)
@@ -179,6 +213,8 @@ export async function deleteSource(id: number): Promise<ActionResult> {
 
 /** Undo a removal so the next seed restores the feed. */
 export async function restoreSource(slug: string): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   await db.delete(retiredSources).where(eq(retiredSources.slug, slug));
 
   const def = SOURCE_REGISTRY.find((s) => s.slug === slug);
@@ -238,6 +274,8 @@ export async function addSource(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   const raw = Object.fromEntries(formData);
   const parsed = addSchema.safeParse({
     ...raw,
@@ -292,6 +330,8 @@ export async function testFeed(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const denied = await denyNonAdmin();
+  if (denied) return denied;
   const feedUrl = String(formData.get("feedUrl") ?? "").trim();
   if (!feedUrl) return { ok: false, message: "Enter a feed URL first" };
 
