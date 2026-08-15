@@ -33,6 +33,8 @@ export interface SourceResult {
   seen: number;
   inserted: number;
   duplicates: number;
+  /** Items dropped by the URL pre-filter, before any embedding was paid for. */
+  preFiltered: number;
   durationMs: number;
   error?: string;
   skipped?: "throttled" | "not-modified";
@@ -47,6 +49,7 @@ export async function ingestSource(source: Source): Promise<SourceResult> {
     seen: 0,
     inserted: 0,
     duplicates: 0,
+    preFiltered: 0,
     durationMs: 0,
   };
 
@@ -64,10 +67,16 @@ export async function ingestSource(source: Source): Promise<SourceResult> {
     const cutoff = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000);
     const fresh = result.items.filter((i) => i.publishedAt >= cutoff);
 
-    // Embed the whole poll in one batched request rather than one call per
-    // article. Returns null vectors when embeddings are off or the call fails,
-    // in which case dedup falls back to title similarity.
-    const embedded = await embedItems(fresh, (item) =>
+    // Discard anything we already hold *before* embedding. Feeds re-serve
+    // their whole window on every poll, and the aggregator queries can't use
+    // conditional GET at all, so embedding first meant paying to re-embed the
+    // same ~100 items 48 times a day — about 99% of all embedding spend.
+    const unseen = await filterAlreadySeen(fresh);
+
+    // One batched request for what's genuinely new. Returns null vectors when
+    // embeddings are off or the call fails, in which case dedup falls back to
+    // title similarity.
+    const embedded = await embedItems(unseen, (item) =>
       embeddingText(item.title, item.content),
     );
 
@@ -106,6 +115,7 @@ export async function ingestSource(source: Source): Promise<SourceResult> {
       seen: result.items.length,
       inserted,
       duplicates,
+      preFiltered: fresh.length - unseen.length,
       durationMs,
     };
   } catch (err) {
@@ -138,6 +148,51 @@ export async function ingestSource(source: Source): Promise<SourceResult> {
 
     return { ...base, ok: false, error: message, durationMs };
   }
+}
+
+/**
+ * Drop items we already hold, using only the two exact-match URL checks.
+ *
+ * Deliberately cheap and batched: two indexed queries for the whole poll
+ * rather than two per item, and no embeddings. Everything surviving this is a
+ * candidate worth paying to embed; everything else would have been discarded
+ * by `storeItem` anyway.
+ *
+ * This is an optimisation, not the dedup itself — `storeItem` still repeats
+ * both checks, which keeps it correct if called directly and closes the race
+ * between this filter and the insert.
+ */
+export async function filterAlreadySeen(items: FeedItem[]): Promise<FeedItem[]> {
+  if (items.length === 0) return [];
+
+  const canonicalById = new Map(items.map((i) => [i.url, canonicalizeUrl(i.url)]));
+  const canonicals = [...new Set(canonicalById.values())];
+  const urls = [...new Set(items.map((i) => i.url))];
+
+  const [knownArticles, knownDuplicates] = await Promise.all([
+    db
+      .select({ canonicalUrl: articles.canonicalUrl })
+      .from(articles)
+      .where(inArray(articles.canonicalUrl, canonicals)),
+    db
+      .select({ url: articleDuplicates.url })
+      .from(articleDuplicates)
+      .where(inArray(articleDuplicates.url, urls)),
+  ]);
+
+  const seenCanonical = new Set(knownArticles.map((r) => r.canonicalUrl));
+  const seenDuplicate = new Set(knownDuplicates.map((r) => r.url));
+
+  const out: FeedItem[] = [];
+  for (const item of items) {
+    const canonical = canonicalById.get(item.url)!;
+    // A feed can list the same story twice under different tracking params;
+    // without this both copies would be embedded and one thrown away.
+    if (seenCanonical.has(canonical) || seenDuplicate.has(item.url)) continue;
+    seenCanonical.add(canonical);
+    out.push(item);
+  }
+  return out;
 }
 
 type StoreOutcome = "inserted" | "duplicate" | "skipped";
@@ -450,6 +505,8 @@ export interface CycleSummary {
   polled: number;
   inserted: number;
   duplicates: number;
+  /** Items skipped before embedding — the difference between cents and dollars. */
+  preFiltered: number;
   failed: number;
   results: SourceResult[];
 }
@@ -470,6 +527,7 @@ export async function runCycle(slugs?: string[]): Promise<CycleSummary> {
     polled: results.length,
     inserted: results.reduce((n, r) => n + r.inserted, 0),
     duplicates: results.reduce((n, r) => n + r.duplicates, 0),
+    preFiltered: results.reduce((n, r) => n + r.preFiltered, 0),
     failed: results.filter((r) => !r.ok).length,
     results,
   };

@@ -14,3 +14,8 @@ next-env.d.ts
 .DS_Store
 *.log
 npm-debug.log*
+.vercel
+
+# Every env file is secret except the committed template.
+.env*
+!.env.example
