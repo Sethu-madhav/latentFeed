@@ -70,6 +70,20 @@ Both degrade to the Section 1 behaviour on any failure. A fatal auth or
 billing error stops the batch on the first article and latches for the process
 rather than repeating for every row — check `/healthz` for `halted`.
 
+**Embed last, after the URL checks — never before.** Embeddings are the only
+part of the pipeline that costs real money (the free tier covers chat models
+only), and feeds re-serve their whole window on every poll: the Google News
+queries can't use conditional GET at all, so a 100-item feed returns the same
+~98 items 48 times a day. Embedding before the dedup checks meant paying to
+re-encode articles already stored — ~99% of all embedding spend, about $4.50 a
+month against $0.03 of useful work. `filterAlreadySeen` in `worker/ingest.ts`
+now runs both exact-URL checks as two batched indexed queries for the whole
+poll, and only survivors reach `embedItems`. Measured in production: 470 items
+seen, 453 skipped, 17 embedded. `storeItem` still repeats both checks — the
+pre-filter is an optimisation, not the dedup itself, and the duplication closes
+the race between filtering and inserting. Anything that reorders this pipeline
+must keep the paid step last.
+
 **The LLM never overrides credibility opaquely.** It returns a claim status
 (`confirmed` / `reported` / `unconfirmed`) which the scorer applies as a
 recorded rule: `llm-unconfirmed` docks a point for hedging the keywords missed,
