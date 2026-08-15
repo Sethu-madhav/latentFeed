@@ -35,12 +35,6 @@ export default async function RadarPage() {
             <span className="rounded-md bg-paper-sunken px-2 py-1 font-medium text-ink">
               Radar
             </span>
-            <a
-              href="/releases"
-              className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
-            >
-              Releases
-            </a>
             <SourcesLink className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink" />
           </nav>
           <div className="flex-1" />

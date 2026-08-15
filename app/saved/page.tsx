@@ -35,12 +35,6 @@ export default async function SavedPage() {
             >
               Radar
             </a>
-            <a
-              href="/releases"
-              className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:text-ink"
-            >
-              Releases
-            </a>
           </nav>
           <div className="flex-1" />
           <ThemeToggle />

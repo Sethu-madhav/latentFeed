@@ -5,6 +5,7 @@ import { cn, relativeTime, timeAgo } from "@/lib/utils";
 import { AccountMenu } from "./account-menu";
 import { ReaderControls } from "./reader-controls";
 import { SearchBox } from "./search-box";
+import { SourceStats } from "./source-stats";
 import { SourcesLink } from "./sources-link";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -53,12 +54,6 @@ export function SiteHeader({
           Saved{reader.saved > 0 ? ` ${reader.saved}` : ""}
         </a>
 
-        <a
-          href="/releases"
-          className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block"
-        >
-          Releases
-        </a>
 
         <Suspense fallback={null}>
           <SourcesLink className="hidden shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:text-ink sm:block" />
@@ -111,12 +106,9 @@ export function SiteHeader({
         <span className="tabular-nums">{stats.total.toLocaleString()} articles</span>
         <span className="tabular-nums">{stats.last24h} in 24h</span>
         <span className="tabular-nums">{stats.rumours} unverified</span>
-        <span className="tabular-nums">{stats.activeSources} sources</span>
-        {stats.failingSources > 0 && (
-          <span className="text-clay-deep" title="Sources with recent fetch failures">
-            {stats.failingSources} failing
-          </span>
-        )}
+        <Suspense fallback={null}>
+          <SourceStats stats={stats} />
+        </Suspense>
         {stats.lastIngestAt && (
           <span className="ml-auto shrink-0" title={stats.lastIngestAt.toLocaleString()}>
             updated {timeAgo(stats.lastIngestAt)}

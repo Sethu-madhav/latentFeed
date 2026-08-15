@@ -2,6 +2,7 @@ import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { eq, sql } from "drizzle-orm";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import { cache } from "react";
 import { db } from "@/db/client";
 import {
   accounts,
@@ -179,8 +180,12 @@ export async function isAdmin(): Promise<boolean> {
  * Mutations are rare and destructive, so they pay for one indexed lookup and
  * get an answer that revocation actually affects. Rendering keeps using the
  * token; being a few minutes stale about whether to draw a button is fine.
+ *
+ * Wrapped in React's `cache` so the several server components that ask during
+ * one render — the nav link and the source counters, at minimum — share a
+ * single query rather than issuing one each.
  */
-export async function isAdminNow(): Promise<boolean> {
+export const isAdminNow = cache(async function isAdminNow(): Promise<boolean> {
   const user = await currentUser();
   if (!user) return false;
 
@@ -190,7 +195,7 @@ export async function isAdminNow(): Promise<boolean> {
     .where(eq(users.id, user.id))
     .limit(1);
   return row?.role === "admin";
-}
+});
 
 /** Throws unless the caller is an admin. For non-ActionResult callers. */
 export async function requireAdmin(): Promise<string> {
