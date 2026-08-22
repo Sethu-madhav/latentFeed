@@ -333,6 +333,91 @@ const GOOGLE_NEWS: SourceDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Leaks and rumour.
+//
+// The scarce category. Before these existed the whole corpus held 14 articles
+// containing leak vocabulary at all, out of ~2,000 — the classifier was fine,
+// the material simply never arrived.
+//
+// Reported leaks, not leakers. The people worth following — Tibor Blaho,
+// TestingCatalog's own account, the rest — publish on X, which serves no RSS
+// and refuses anonymous reads, and the Nitter bridges that used to stand in
+// are gone. A feed wired through one of those would look healthy and quietly
+// return nothing, which is the exact failure mode `probeFeed` exists to catch.
+// So these track the reporting a leak produces, which arrives one hop later
+// and carries a publisher domain we can actually score.
+//
+// Both queries were measured before being added rather than guessed at; the
+// numbers in each comment are from that probe.
+// ---------------------------------------------------------------------------
+const LEAKS: SourceDef[] = [
+  {
+    slug: "gnews-frontier-leaks",
+    name: "Frontier lab leaks & scoops",
+    /*
+     * 25% of returned items on-target, ~1% off-domain — the strongest of the
+     * eight query shapes tried. It leans on attribution language ("sources
+     * say", "people familiar") as much as on "leaked", which is what pulls in
+     * the real scoops: Anthropic's source-code leak via CNBC, DeepSeek's chip
+     * programme via Reuters.
+     *
+     * Bare "leak" is deliberately absent. It matches data breaches far more
+     * often than model leaks, and dragged an earlier version down to 10%.
+     */
+    feedUrl: googleNews(
+      '(OpenAI OR Anthropic OR DeepMind OR xAI OR DeepSeek OR Moonshot OR Mistral OR ' +
+        'ChatGPT OR Claude OR Gemini OR Grok OR Llama OR Qwen OR Kimi) ' +
+        '(leaked OR unreleased OR datamined OR "sources say" OR "people familiar")',
+      "14d",
+    ),
+    kind: "google_news",
+    category: "leaks",
+    // Aggregator, so the real publisher's tier decides the score anyway; this
+    // only applies to items that arrive without a publisher domain.
+    baseCredibility: 2,
+    pollMinutes: 60,
+  },
+  {
+    slug: "gnews-unreleased-models",
+    name: "Unreleased model chatter",
+    /*
+     * Named models that do not exist yet. Lower volume (~50 items on a 30-day
+     * window, 14% on-target) but zero off-domain pollution in the probe, and
+     * every hit is exactly the thing this section is for — "GPT-6 clues are
+     * piling up", "Leaked DeepSeek V5", "Google pivots to Gemini 4".
+     *
+     * The names go stale and must be moved forward as models ship — a name
+     * that has launched stops being a rumour and starts pulling in ordinary
+     * launch coverage. The first draft of this list proved the point
+     * immediately: it named Kimi K3, which had already shipped, and 9 of the
+     * 11 articles it returned were K3 reviews and benchmarks.
+     *
+     * The `models` table is the check. Anything sitting at `released` or
+     * `confirmed` there has shipped and belongs one version further on:
+     *
+     *   select name, status from models where status in ('released','confirmed');
+     *
+     * That query is also what caught "Grok 6" skipping a generation while the
+     * radar showed Grok 4.6 as the newest confirmed build.
+     */
+    feedUrl: googleNews(
+      '("GPT-6" OR "Claude 6" OR "Gemini 4" OR "Grok 5" OR "Llama 5" OR ' +
+        '"DeepSeek V5" OR "Qwen 4" OR "Kimi K4" OR "GLM 6") ' +
+        // "Gemini 4" is also a 1965 NASA mission, and Britannica's write-up of
+        // Ed White's spacewalk scored a clean 3/5 on its way into the feed.
+        "-NASA -astronaut -spacewalk -spaceflight",
+      "30d",
+    ),
+    kind: "google_news",
+    category: "leaks",
+    baseCredibility: 2,
+    // A 30-day window over a slow-moving query: half-hourly polling would
+    // re-serve the same month of items 48 times a day for nothing.
+    pollMinutes: 180,
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Press.
 // ---------------------------------------------------------------------------
 const PRESS: SourceDef[] = [
@@ -614,6 +699,7 @@ export const SOURCE_REGISTRY: SourceDef[] = [
   ...FIRST_PARTY,
   ...MODEL_DROPS,
   ...GOOGLE_NEWS,
+  ...LEAKS,
   ...PRESS,
   ...ANALYSTS,
   ...RESEARCH,

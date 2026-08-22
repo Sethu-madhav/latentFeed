@@ -349,6 +349,44 @@ unchanged and still what `npm run dev` uses.
   symbols that are plainly imported. Stop the dev server, `rm -rf .next`,
   restart. Several "impossible" errors here were only ever this.
 
+## Leaks and rumour
+
+The scarcest category, and the one the app is nominally for. Before the leak
+feeds existed the corpus held **14 articles containing leak vocabulary at all,
+out of ~2,000** — and the classifier was not at fault. `model-leak` rules in
+`lib/enrich/classify.ts` fire correctly; the material simply never arrived.
+Diagnose a coverage gap here by counting the vocabulary in `articles` before
+touching the classifier.
+
+**Reported leaks, not leakers.** The people worth following publish on X, which
+serves no RSS and refuses anonymous reads; the Nitter bridges that used to
+stand in are gone. A feed wired through one would look healthy and quietly
+return nothing — the failure mode `probeFeed` exists to catch. So the leak
+feeds track the *reporting* a leak produces, which arrives one hop later and
+carries a publisher domain the scorer can actually rate.
+
+**Every query here was measured before being added.** Eight shapes were probed
+for on-target ratio; two survived. Bare `leak` was dropped because it matches
+data breaches far more than model leaks (10% on-target); attribution language
+— `"sources say"`, `"people familiar"` — turned out to carry the real scoops
+and reached 25%.
+
+**`gnews-unreleased-models` goes stale by construction.** A model name that has
+shipped stops being a rumour and starts pulling ordinary launch coverage. The
+first draft named Kimi K3, already shipped, and 9 of its 11 results were K3
+reviews. The `models` table is the check — anything at `released` or
+`confirmed` belongs one version further on:
+
+```sql
+select name, status from models where status in ('released','confirmed');
+```
+
+That query also caught `"Grok 6"` skipping a generation past a Grok 4.6 radar.
+
+**Watch for homonyms in version-number queries.** `"Gemini 4"` is also a 1965
+NASA mission, and Britannica's spacewalk write-up scored a clean 3/5 on its way
+in. `test/leak-sources.test.ts` pins the exclusion.
+
 ## Source control (`/sources`)
 
 Two independent off-switches, and conflating them is the easiest mistake here:
